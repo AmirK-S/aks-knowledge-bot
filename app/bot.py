@@ -324,8 +324,51 @@ async def handle_message(msg: Message):
 # Main
 # ---------------------------------------------------------------------------
 
+async def _auto_migrate():
+    """Auto-migrate from Google Sheets on first start if DB is empty."""
+    from app.database import get_stats
+    stats = await get_stats()
+    if stats["total"] > 0:
+        log.info("DB has %d entries, skipping migration", stats["total"])
+        return
+
+    log.info("DB is empty, auto-migrating from Google Sheets...")
+    try:
+        imported = 0
+        for tab in ("Reels", "Youtube"):
+            rows = await read_all_from_sheet(tab)
+            log.info("Read %d rows from %s", len(rows), tab)
+            for row in rows:
+                url = row.get("url", "").strip()
+                if not url:
+                    continue
+                platform = row.get("platform", "").strip()
+                if not platform:
+                    platform = "instagram" if tab == "Reels" else "youtube"
+                try:
+                    await insert_entry(
+                        url=url,
+                        platform=platform,
+                        title=None,
+                        raw_transcript=row.get("scrapedtranscript", "").strip() or None,
+                        analysis=row.get("answer", "").strip() or None,
+                        key_points=row.get("keypoints", "").strip() or None,
+                        category=row.get("category", "").strip() or None,
+                        tags="[]",
+                        language="fr",
+                        source_type="reel" if tab == "Reels" else "video",
+                    )
+                    imported += 1
+                except Exception as e:
+                    log.warning("Migration skip %s: %s", url[:60], e)
+        log.info("Migration complete: %d entries imported", imported)
+    except Exception:
+        log.exception("Migration failed")
+
+
 async def main():
     log.info("Starting AKS Knowledge Brain bot...")
+    await _auto_migrate()
     try:
         await dp.start_polling(bot, drop_pending_updates=True)
     finally:
