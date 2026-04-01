@@ -5,7 +5,8 @@ import logging
 import re
 import sys
 
-from aiogram import Bot, Dispatcher, types, F
+from aiogram import Bot, Dispatcher, F
+from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
@@ -26,7 +27,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("aks_brain")
 
-bot = Bot(token=TELEGRAM_TOKEN, default=types.DefaultBotProperties(parse_mode=ParseMode.HTML))
+bot = Bot(token=TELEGRAM_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
 # ---------------------------------------------------------------------------
