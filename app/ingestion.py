@@ -30,6 +30,14 @@ async def ingest_url(
     transcript = dl.get("transcript")
     audio_path = dl.get("audio_path")
     source_type = dl.get("source_type")
+    duration = dl.get("duration")
+
+    # Auto-adapt detail level based on duration if not explicitly set
+    if detail_level == "normal" and duration:
+        if duration < 180:  # < 3 min (shorts, reels)
+            detail_level = "short"
+        elif duration > 900:  # > 15 min (long videos)
+            detail_level = "detailed"
 
     # 2. Transcribe if needed
     if not transcript and audio_path:

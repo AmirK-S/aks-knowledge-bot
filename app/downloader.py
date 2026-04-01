@@ -81,7 +81,7 @@ async def youtube_get_subtitles(url: str) -> dict:
             "--sub-format", "srt/vtt/best",
             "--convert-subs", "srt",
             "-o", sub_path,
-            "--print", "%(title)s",
+            "--print", "%(title)s\n%(duration)s",
             "--no-warnings",
             canonical,
         ]
@@ -89,7 +89,9 @@ async def youtube_get_subtitles(url: str) -> dict:
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
         stdout, stderr = await proc.communicate()
-        title = stdout.decode().strip().split("\n")[0] if stdout else None
+        out_lines = stdout.decode().strip().split("\n") if stdout else []
+        title = out_lines[0] if out_lines else None
+        duration = int(out_lines[1]) if len(out_lines) > 1 and out_lines[1].isdigit() else None
 
         # Check for subtitle files
         for lang in ("en", "fr", "en-orig"):
@@ -101,7 +103,7 @@ async def youtube_get_subtitles(url: str) -> dict:
                     transcript = _clean_srt(raw)
                     if transcript and len(transcript) > 50:
                         log.info("Got subtitles for %s (lang=%s)", canonical, lang)
-                        return {"title": title, "transcript": transcript, "audio_path": None}
+                        return {"title": title, "transcript": transcript, "audio_path": None, "duration": duration}
 
         # No subtitles found — download audio for transcription
         log.info("No subtitles found for %s, downloading audio", canonical)
@@ -129,9 +131,9 @@ async def youtube_get_subtitles(url: str) -> dict:
             import shutil
             persistent = tempfile.mktemp(suffix=".m4a")
             shutil.copy2(audio_path, persistent)
-            return {"title": title, "transcript": None, "audio_path": persistent}
+            return {"title": title, "transcript": None, "audio_path": persistent, "duration": duration}
 
-        return {"title": title, "transcript": None, "audio_path": None}
+        return {"title": title, "transcript": None, "audio_path": None, "duration": None}
 
 
 def _clean_srt(raw: str) -> str:
@@ -172,14 +174,14 @@ async def instagram_get_audio(url: str) -> dict:
         data = resp.json()
 
     if not data:
-        return {"title": None, "transcript": None, "audio_path": None}
+        return {"title": None, "transcript": None, "audio_path": None, "duration": None}
 
     item = data[0] if isinstance(data, list) else data
     video_url = item.get("videoUrl") or item.get("video_url")
     title = item.get("caption", "")[:200] if item.get("caption") else None
 
     if not video_url:
-        return {"title": title, "transcript": None, "audio_path": None}
+        return {"title": title, "transcript": None, "audio_path": None, "duration": None}
 
     # Download and extract audio with yt-dlp
     audio_path = tempfile.mktemp(suffix=".m4a")
@@ -196,7 +198,7 @@ async def instagram_get_audio(url: str) -> dict:
     await proc.communicate()
 
     if os.path.exists(audio_path):
-        return {"title": title, "transcript": None, "audio_path": audio_path}
+        return {"title": title, "transcript": None, "audio_path": audio_path, "duration": None}
 
     # Fallback: download raw video and extract with ffmpeg
     video_path = tempfile.mktemp(suffix=".mp4")
@@ -214,9 +216,9 @@ async def instagram_get_audio(url: str) -> dict:
     os.unlink(video_path)
 
     if os.path.exists(audio_path2):
-        return {"title": title, "transcript": None, "audio_path": audio_path2}
+        return {"title": title, "transcript": None, "audio_path": audio_path2, "duration": None}
 
-    return {"title": title, "transcript": None, "audio_path": None}
+    return {"title": title, "transcript": None, "audio_path": None, "duration": None}
 
 
 # ---------------------------------------------------------------------------
@@ -243,8 +245,8 @@ async def generic_get_audio(url: str) -> dict:
     title = stdout.decode().strip().split("\n")[0] if stdout else None
 
     if os.path.exists(audio_path):
-        return {"title": title, "transcript": None, "audio_path": audio_path}
-    return {"title": title, "transcript": None, "audio_path": None}
+        return {"title": title, "transcript": None, "audio_path": audio_path, "duration": None}
+    return {"title": title, "transcript": None, "audio_path": None, "duration": None}
 
 
 # ---------------------------------------------------------------------------
