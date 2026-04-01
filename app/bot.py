@@ -370,6 +370,10 @@ async def main():
     log.info("Starting AKS Knowledge Brain bot...")
     await _auto_migrate()
 
+    # Clean up migrated data
+    from app.cleanup import run_cleanup
+    await run_cleanup()
+
     # Start web dashboard
     from app.web import start_web_server
     web = await start_web_server(8080)
