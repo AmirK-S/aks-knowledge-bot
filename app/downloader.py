@@ -1,4 +1,6 @@
 """Download videos and extract subtitles/audio from various platforms."""
+from __future__ import annotations
+
 import asyncio
 import json
 import os
