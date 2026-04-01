@@ -26,6 +26,13 @@ def _get_sa_key() -> dict | None:
     global _SA_KEY
     if _SA_KEY is not None:
         return _SA_KEY
+    # Try base64-encoded key first
+    b64 = os.environ.get("GOOGLE_SA_KEY_B64")
+    if b64:
+        import base64
+        _SA_KEY = json.loads(base64.b64decode(b64))
+        return _SA_KEY
+    # Try raw JSON
     raw = os.environ.get("GOOGLE_SA_KEY")
     if raw:
         _SA_KEY = json.loads(raw)
