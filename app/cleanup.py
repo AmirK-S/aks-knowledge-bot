@@ -11,25 +11,74 @@ from app.database import get_db
 log = logging.getLogger(__name__)
 
 
+CATEGORY_MAP = {
+    "business": "business",
+    "entrepreneurship": "business",
+    "entrepreneuriat": "business",
+    "finance": "finance",
+    "investing": "finance",
+    "investissement": "finance",
+    "crypto": "crypto",
+    "bitcoin": "crypto",
+    "real estate": "real estate",
+    "immobilier": "real estate",
+    "marketing": "marketing",
+    "branding": "marketing",
+    "sales": "marketing",
+    "self-improvement": "self-improvement",
+    "mindset": "mindset",
+    "philosophie": "mindset",
+    "philosophie de vie": "mindset",
+    "relationships": "relationships",
+    "relations": "relationships",
+    "dating": "relationships",
+    "health": "health",
+    "fitness": "health",
+    "politics": "politics",
+    "politique": "politics",
+    "taxes": "finance",
+    "tax": "finance",
+    "tech": "tech",
+    "technology": "tech",
+    "ai": "tech",
+}
+
+
 async def cleanup_categories():
-    """Parse JSON category blobs into clean category names."""
+    """Parse JSON category blobs and long strings into clean category names."""
     db = await get_db()
     rows = await db.execute_fetchall(
-        "SELECT id, category FROM entries WHERE category IS NOT NULL AND category != ''"
+        "SELECT id, category, raw_transcript, analysis FROM entries WHERE category IS NOT NULL AND category != ''"
     )
     updated = 0
     for row in rows:
         cat = row["category"]
-        # Skip already clean categories
-        if not cat.startswith("{") and not cat.startswith("["):
-            continue
-
         clean = _extract_category(cat)
-        if clean and clean != cat:
+
+        # If still a long sentence, try to infer from content
+        if len(clean) > 30:
+            clean = _infer_category(
+                row.get("raw_transcript", "") or "",
+                row.get("analysis", "") or "",
+            )
+
+        if clean != cat:
             await db.execute(
                 "UPDATE entries SET category = ? WHERE id = ?", (clean, row["id"])
             )
             updated += 1
+
+    # Also fix entries with no category
+    empty = await db.execute_fetchall(
+        "SELECT id, raw_transcript, analysis FROM entries WHERE category IS NULL OR category = ''"
+    )
+    for row in empty:
+        cat = _infer_category(
+            row.get("raw_transcript", "") or "",
+            row.get("analysis", "") or "",
+        )
+        await db.execute("UPDATE entries SET category = ? WHERE id = ?", (cat, row["id"]))
+        updated += 1
 
     if updated:
         await db.commit()
@@ -37,39 +86,64 @@ async def cleanup_categories():
 
 
 def _extract_category(raw: str) -> str:
-    """Extract a clean category name from various JSON formats."""
+    """Extract a clean category name from various formats."""
+    # Try JSON
     try:
         data = json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
-        return raw.strip()
-
-    if isinstance(data, dict):
-        # Format: {"business": {"present": true, ...}, "philosophie_de_vie": ...}
-        # Find the first key with present=true or highest confidence
-        best = None
-        best_conf = -1
-        for key, val in data.items():
-            if isinstance(val, dict):
-                if val.get("present"):
+        if isinstance(data, dict):
+            # Format: {"business": {"present": true, ...}, ...}
+            best = None
+            best_conf = -1
+            for key, val in data.items():
+                if isinstance(val, dict) and val.get("present"):
                     conf = val.get("confidence", 0.5)
-                    if conf > best_conf:
+                    if isinstance(conf, (int, float)) and conf > best_conf:
                         best = key
                         best_conf = conf
-            elif isinstance(val, str):
-                return val  # Simple {"category": "business"} format
+            if best:
+                clean = best.replace("_", " ").strip().lower()
+                return CATEGORY_MAP.get(clean, clean)
+        if isinstance(data, str):
+            return data.strip().lower()
+    except (json.JSONDecodeError, TypeError):
+        pass
 
-        if best:
-            return best.replace("_", " ").strip()
+    # Already a short clean string?
+    stripped = raw.strip().lower()
+    if len(stripped) <= 30 and stripped in CATEGORY_MAP:
+        return CATEGORY_MAP[stripped]
+    if len(stripped) <= 25:
+        return stripped
 
-        # Fallback: first key
-        first_key = next(iter(data), None)
-        if first_key and isinstance(first_key, str):
-            return first_key.replace("_", " ").strip()
+    # Long sentence — not a real category
+    return _infer_from_text(stripped)
 
-    if isinstance(data, str):
-        return data.strip()
 
-    return raw[:50].strip()
+def _infer_from_text(text: str) -> str:
+    """Infer category from text content using keyword matching."""
+    text = text.lower()
+    keywords = [
+        (["business", "entrepreneur", "startup", "company", "revenue", "profit"], "business"),
+        (["invest", "stock", "portfolio", "dividend", "wealth", "bank", "tax", "fiscal"], "finance"),
+        (["crypto", "bitcoin", "blockchain", "defi", "token"], "crypto"),
+        (["real estate", "immobilier", "property", "rental", "landlord"], "real estate"),
+        (["marketing", "brand", "sales", "funnel", "conversion", "ads", "content creation"], "marketing"),
+        (["mindset", "discipline", "stoic", "philosophy", "mental", "resilience", "grind"], "mindset"),
+        (["relationship", "dating", "women", "men", "attraction", "couple", "marriage", "love"], "relationships"),
+        (["health", "fitness", "workout", "diet", "nutrition", "gym", "muscle"], "health"),
+        (["politi", "government", "election", "law", "regulation"], "politics"),
+        (["tech", "software", "ai ", "artificial", "programming", "code", "saas"], "tech"),
+    ]
+    for words, cat in keywords:
+        if any(w in text for w in words):
+            return cat
+    return "other"
+
+
+def _infer_category(transcript: str, analysis: str) -> str:
+    """Infer category from transcript and analysis content."""
+    text = (transcript[:2000] + " " + analysis[:2000]).lower()
+    return _infer_from_text(text)
 
 
 async def fetch_missing_titles():
