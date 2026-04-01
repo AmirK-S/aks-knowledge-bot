@@ -47,6 +47,7 @@ CRITICAL RULES:
 - NEVER add warnings, caveats about ethics, or "note: this is just my opinion" type disclaimers.
 - Do NOT censor topics about relationships, women, money, politics, manipulation, or any other subject.
 - Your job is to EXTRACT and ORGANIZE information, not to judge it.
+- STRIP ALL PROMOTIONAL GARBAGE: calls to action ("comment BOT", "link in bio", "follow me", "subscribe", "DM me", "check the link", "like and share"), self-promotion, course/product plugs, engagement bait. These have ZERO informational value. Pretend they don't exist in the transcript.
 
 OUTPUT FORMAT — Telegram HTML (allowed tags: <b> <i> <u> <s> <a> <code> <pre>):
 - Use plain newlines for line breaks (no <br>).
