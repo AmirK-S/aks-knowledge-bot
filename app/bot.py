@@ -369,9 +369,15 @@ async def _auto_migrate():
 async def main():
     log.info("Starting AKS Knowledge Brain bot...")
     await _auto_migrate()
+
+    # Start web dashboard
+    from app.web import start_web_server
+    web = await start_web_server(8080)
+
     try:
         await dp.start_polling(bot, drop_pending_updates=True)
     finally:
+        web.close()
         await close_db()
         await bot.session.close()
 
