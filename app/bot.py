@@ -283,28 +283,11 @@ async def handle_message(msg: Message):
 # Main
 # ---------------------------------------------------------------------------
 
-async def _health_server():
-    """Minimal HTTP health check server for Coolify."""
-    from asyncio import start_server
-
-    async def handle(reader, writer):
-        await reader.read(1024)
-        writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK")
-        await writer.drain()
-        writer.close()
-
-    server = await start_server(handle, "0.0.0.0", 8443)
-    log.info("Health check server on :8443")
-    return server
-
-
 async def main():
     log.info("Starting AKS Knowledge Brain bot...")
-    health = await _health_server()
     try:
-        await dp.start_polling(bot)
+        await dp.start_polling(bot, drop_pending_updates=True)
     finally:
-        health.close()
         await close_db()
         await bot.session.close()
 
