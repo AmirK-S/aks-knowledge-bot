@@ -171,6 +171,25 @@ async def get_entry_by_url(url: str) -> dict | None:
     return dict(rows[0]) if rows else None
 
 
+async def get_entries_by_platform(platform: str, limit: int = 50) -> list[dict]:
+    db = await get_db()
+    rows = await db.execute_fetchall(
+        "SELECT * FROM entries WHERE platform = ? ORDER BY created_at DESC LIMIT ?",
+        (platform, limit),
+    )
+    return [dict(r) for r in rows]
+
+
+async def get_category_entries_for_summary(category: str) -> list[dict]:
+    """Get all entries in a category with analysis for summarization."""
+    db = await get_db()
+    rows = await db.execute_fetchall(
+        "SELECT id, url, title, category, platform, key_points, analysis FROM entries WHERE category = ? ORDER BY created_at DESC",
+        (category,),
+    )
+    return [dict(r) for r in rows]
+
+
 async def close_db():
     global _db
     if _db:

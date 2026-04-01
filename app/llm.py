@@ -210,3 +210,37 @@ async def generate_recap(entries: list[dict]) -> str:
         {"role": "system", "content": RECAP_SYSTEM},
         {"role": "user", "content": "\n---\n".join(entries_text)},
     ], max_tokens=12000)
+
+
+# ---------------------------------------------------------------------------
+# Category synthesis
+# ---------------------------------------------------------------------------
+
+CATEGORY_SYNTHESIS_SYSTEM = """You are AKS's personal knowledge architect. You synthesize ALL knowledge from a specific domain into one comprehensive reference document.
+
+RULES:
+- This is a MASTER DOCUMENT, not a list of summaries. Connect ideas across sources.
+- Organize by themes and sub-themes, not by video.
+- Include specific numbers, names, strategies, frameworks.
+- Preserve raw tone — no moralizing, no censoring.
+- Flag contradictions between sources.
+- End with a clear "What I know" section: the consolidated actionable knowledge.
+- Format: HTML (tags: b, i, u, a). Newlines, not <br>.
+- Be EXHAUSTIVE. This is a reference document to consult."""
+
+
+async def synthesize_category(category: str, entries: list[dict]) -> str:
+    entries_text = []
+    for e in entries:
+        part = f"Title: {e.get('title') or e.get('url', '?')}\n"
+        part += f"URL: {e.get('url', '')}\n"
+        if e.get("key_points"):
+            part += f"Key points: {e['key_points']}\n"
+        if e.get("analysis"):
+            part += f"Analysis: {e['analysis'][:3000]}\n"
+        entries_text.append(part)
+
+    return await _call([
+        {"role": "system", "content": CATEGORY_SYNTHESIS_SYSTEM},
+        {"role": "user", "content": f"DOMAIN: {category}\nNUMBER OF SOURCES: {len(entries)}\n\n" + "\n---\n".join(entries_text)},
+    ], max_tokens=16000)

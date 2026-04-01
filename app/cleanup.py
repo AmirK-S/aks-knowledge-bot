@@ -176,8 +176,7 @@ async def fetch_missing_titles():
         except Exception:
             pass  # Skip failures silently
 
-        # Small delay to be nice to APIs
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(0.1)
 
     await db.commit()
     log.info("Fetched %d titles total", updated)
