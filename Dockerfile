@@ -15,6 +15,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app/ ./app/
 
 # Data volume for SQLite
+RUN mkdir -p /data
 VOLUME /data
+
+EXPOSE 8443
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8443/')" || exit 1
 
 CMD ["python", "-m", "app.bot"]
