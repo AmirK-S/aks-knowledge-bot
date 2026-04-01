@@ -58,8 +58,8 @@ async def cleanup_categories():
         # If still a long sentence, try to infer from content
         if len(clean) > 30:
             clean = _infer_category(
-                row.get("raw_transcript", "") or "",
-                row.get("analysis", "") or "",
+                (dict(row).get("raw_transcript") or ""),
+                (dict(row).get("analysis") or ""),
             )
 
         if clean != cat:
@@ -73,9 +73,10 @@ async def cleanup_categories():
         "SELECT id, raw_transcript, analysis FROM entries WHERE category IS NULL OR category = ''"
     )
     for row in empty:
+        r = dict(row)
         cat = _infer_category(
-            row.get("raw_transcript", "") or "",
-            row.get("analysis", "") or "",
+            r.get("raw_transcript") or "",
+            r.get("analysis") or "",
         )
         await db.execute("UPDATE entries SET category = ? WHERE id = ?", (cat, row["id"]))
         updated += 1
