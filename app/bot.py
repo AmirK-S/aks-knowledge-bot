@@ -15,9 +15,11 @@ from app.config import TELEGRAM_TOKEN, OWNER_CHAT_ID
 from app.database import (
     search_entries, get_all_categories, get_entries_by_category,
     get_stats, get_recent_entries, get_random_entry, close_db,
+    insert_entry,
 )
 from app.ingestion import ingest_url
 from app.llm import query_brain, generate_recap
+from app.sheets import read_all_from_sheet
 from app.telegram_utils import chunk_message, format_entry_short
 
 logging.basicConfig(
@@ -174,6 +176,45 @@ async def cmd_ask(msg: Message):
 
     answer = await query_brain(question, entries, detail)
     await _send(msg, answer)
+
+
+@dp.message(Command("migrate"))
+async def cmd_migrate(msg: Message):
+    if not _is_owner(msg):
+        return
+    await msg.answer("Starting migration from Google Sheets...")
+    imported = 0
+    skipped = 0
+    for tab in ("Reels", "Youtube"):
+        await msg.answer(f"Reading {tab} tab...")
+        rows = await read_all_from_sheet(tab)
+        for row in rows:
+            url = row.get("url", "").strip()
+            if not url:
+                skipped += 1
+                continue
+            try:
+                await insert_entry(
+                    url=url,
+                    platform=row.get("platform", ""),
+                    title=None,
+                    raw_transcript=row.get("scrapedtranscript", "") or None,
+                    analysis=row.get("answer", "") or None,
+                    key_points=row.get("keypoints", "") or None,
+                    category=row.get("category", "") or None,
+                    tags="[]",
+                    language="fr" if tab == "Reels" else "en",
+                    source_type="reel" if tab == "Reels" else "video",
+                )
+                imported += 1
+            except Exception as e:
+                log.warning("Migration skip %s: %s", url, e)
+                skipped += 1
+    await msg.answer(
+        f"<b>Migration complete</b>\n\n"
+        f"Imported: <b>{imported}</b>\n"
+        f"Skipped: <b>{skipped}</b>"
+    )
 
 
 @dp.message(Command("recap"))

@@ -9,6 +9,7 @@ from app.downloader import download_and_extract
 from app.transcription import transcribe
 from app.llm import analyze_transcript, categorize
 from app.database import insert_entry, get_entry_by_url
+from app.sheets import append_to_sheet
 
 log = logging.getLogger(__name__)
 
@@ -80,6 +81,14 @@ async def ingest_url(
     )
 
     log.info("Stored entry #%d: %s [%s]", entry_id, canonical_url, category)
+
+    # 6. Backup to Google Sheets
+    tab = "Youtube" if platform == "youtube" else "Reels"
+    await append_to_sheet({
+        "url": canonical_url, "platform": platform, "raw_transcript": transcript,
+        "analysis": analysis, "key_points": key_points, "category": category,
+        "user_prompt": user_prompt or "",
+    }, tab=tab)
 
     return {
         "success": True,
