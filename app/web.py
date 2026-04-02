@@ -422,6 +422,37 @@ loadStats();loadCategories();loadRecent();loadRecaps();loadMacro();
 </script></body></html>"""
 
 
+async def _generate_macro_bg():
+    """Two-pass macro analysis: category summaries → global analysis."""
+    try:
+        log.info("Macro analysis: starting pass 1 (category summaries)...")
+        cats = await get_all_categories()
+        category_summaries = []
+
+        for cat in cats:
+            cat_name = cat["category"]
+            if cat["cnt"] < 2:
+                continue
+            entries = await get_category_entries_for_summary(cat_name)
+            if not entries:
+                continue
+            log.info("Macro pass 1: summarizing %s (%d entries)", cat_name, len(entries))
+            summary = await synthesize_category(cat_name, entries)
+            category_summaries.append({
+                "category": cat_name,
+                "count": len(entries),
+                "summary": summary,
+            })
+
+        log.info("Macro analysis: starting pass 2 (global synthesis from %d categories)...", len(category_summaries))
+        all_entries = await get_recent_entries(days=9999, limit=500)
+        text = await generate_macro_analysis(all_entries, category_summaries)
+        await save_macro_analysis(text, len(all_entries))
+        log.info("Macro analysis complete")
+    except Exception:
+        log.exception("Macro analysis failed")
+
+
 async def _generate_all_recaps_bg():
     """Generate recaps for all past weeks in background."""
     try:
@@ -539,13 +570,9 @@ async def handle_request(reader, writer):
             writer.write(_json_resp({"message": "Generating recaps in background. They will appear shortly."}))
 
         elif path == "/api/generate-macro":
-            entries = await get_recent_entries(days=9999, limit=500)
-            if not entries:
-                writer.write(_json_resp({"error": "No entries"}))
-            else:
-                text = await generate_macro_analysis(entries)
-                await save_macro_analysis(text, len(entries))
-                writer.write(_json_resp({"text": text, "entry_count": len(entries)}))
+            import asyncio as _aio
+            _aio.create_task(_generate_macro_bg())
+            writer.write(_json_resp({"text": "Macro analysis started in background. Generating category summaries first, then global analysis. Refresh in 2-3 minutes.", "entry_count": 0}))
 
         elif path == "/api/generate-recap":
             entries = await get_recent_entries(days=7, limit=50)

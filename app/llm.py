@@ -255,19 +255,48 @@ FORMAT: HTML (b, i, u, a). Newlines, not <br>. No censorship. Raw, direct, usefu
 Be EXHAUSTIVE and SPECIFIC. Reference actual content themes and patterns."""
 
 
-async def generate_macro_analysis(entries: list[dict]) -> str:
-    parts = []
+async def generate_macro_analysis(entries: list[dict], category_summaries: list[dict]) -> str:
+    """Two-pass macro analysis: uses pre-computed category summaries, not raw entries."""
+
+    # Build compact overview of the knowledge base
+    overview = f"KNOWLEDGE BASE: {len(entries)} entries total\n\n"
+
+    # Category distribution
+    cat_counts: dict[str, int] = {}
+    platform_counts: dict[str, int] = {}
     for e in entries:
-        part = f"[{e.get('category', '?')}|{e.get('platform', '?')}] {e.get('title') or e.get('url', '?')}\n"
-        if e.get("key_points"):
-            part += f"KP: {e['key_points'][:300]}\n"
-        if e.get("analysis"):
-            part += f"A: {e['analysis'][:500]}\n"
-        parts.append(part)
+        c = e.get("category", "other")
+        cat_counts[c] = cat_counts.get(c, 0) + 1
+        p = e.get("platform", "?")
+        platform_counts[p] = platform_counts.get(p, 0) + 1
+
+    overview += "CATEGORY DISTRIBUTION:\n"
+    for c, n in sorted(cat_counts.items(), key=lambda x: -x[1]):
+        overview += f"  {c}: {n} entries\n"
+    overview += f"\nPLATFORMS: {platform_counts}\n\n"
+
+    # Sample titles by category (5 per category max)
+    overview += "SAMPLE TITLES BY CATEGORY:\n"
+    by_cat: dict[str, list[str]] = {}
+    for e in entries:
+        c = e.get("category", "other")
+        if c not in by_cat:
+            by_cat[c] = []
+        if len(by_cat[c]) < 5:
+            by_cat[c].append(e.get("title") or e.get("url", "?"))
+    for c, titles in by_cat.items():
+        overview += f"\n[{c}]\n" + "\n".join(f"  - {t}" for t in titles) + "\n"
+
+    # Category syntheses (the real meat — already pre-computed)
+    overview += "\n\nCATEGORY SYNTHESES (pre-analyzed):\n"
+    for cs in category_summaries:
+        overview += f"\n{'='*40}\n"
+        overview += f"CATEGORY: {cs['category']} ({cs['count']} entries)\n"
+        overview += f"{cs['summary'][:3000]}\n"
 
     return await _call([
         {"role": "system", "content": MACRO_SYSTEM},
-        {"role": "user", "content": f"TOTAL ENTRIES: {len(entries)}\n\n" + "\n---\n".join(parts)},
+        {"role": "user", "content": overview},
     ], max_tokens=16000)
 
 
