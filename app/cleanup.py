@@ -176,43 +176,50 @@ async def generate_missing_titles():
     log.info("Generated %d titles", updated)
 
 
+SKIP_TITLES = {
+    "core value extraction", "complete breakdown", "critical caveats",
+    "practical extraction", "evidence cited", "notable formulations",
+    "source", "key ideas", "playbook", "critical caveats & failure modes",
+    "critical caveats &amp; failure modes", "what this video is about",
+    "what this video covers", "overview", "summary", "analysis",
+    "introduction", "conclusion", "closing", "context",
+}
+
+
 def _extract_title_from_content(analysis: str, transcript: str, url: str, platform: str, category: str) -> str | None:
     """Extract a meaningful title from the analysis or transcript."""
-    # Try to find the first <b>...</b> tag in analysis (usually "Core value extraction")
-    # Skip generic headers, look for the SECOND bold section which is usually the topic
     import re
-    bold_matches = re.findall(r"<b>([^<]+)</b>", analysis)
-    for match in bold_matches:
-        # Skip generic headers
-        if match.lower() in ("core value extraction", "complete breakdown", "critical caveats",
-                              "practical extraction", "evidence cited", "notable formulations",
-                              "source", "key ideas", "playbook", "critical caveats & failure modes",
-                              "critical caveats &amp; failure modes"):
-            continue
-        if len(match) > 5 and len(match) < 100:
-            return match.strip()
 
-    # Try first meaningful sentence of analysis
     if analysis:
-        # Remove HTML tags
+        # Remove all HTML tags, get clean text
         clean = re.sub(r"<[^>]+>", "", analysis)
-        # Get first sentence
-        sentences = re.split(r"[.!?\n]", clean)
+        # Split into sentences
+        sentences = re.split(r"[.\n]", clean)
         for s in sentences:
             s = s.strip()
-            if len(s) > 15 and len(s) < 120:
-                return s
+            # Skip short, generic, or header-like sentences
+            if len(s) < 15 or len(s) > 120:
+                continue
+            if s.lower() in SKIP_TITLES:
+                continue
+            # Skip sentences that are just headers (all words capitalized, no verbs)
+            if len(s.split()) <= 3:
+                continue
+            # Good candidate — truncate if needed
+            if len(s) > 80:
+                s = s[:77] + "..."
+            return s
 
     # Try first sentence of transcript
     if transcript:
         sentences = re.split(r"[.!?\n]", transcript[:500])
         for s in sentences:
             s = s.strip()
-            if len(s) > 15 and len(s) < 100:
+            if 15 < len(s) < 80:
                 return s
 
-    # Fallback: platform + category
-    if category:
+    # Fallback
+    if category and category != "other":
         return f"{category.title()} — {platform or 'video'}"
 
     return None
