@@ -12,8 +12,10 @@ from app.database import (
     get_stats, get_all_categories, get_entries_by_category,
     search_entries, get_recent_entries, get_db,
     get_entries_by_platform, get_category_entries_for_summary,
+    get_all_weeks, get_entries_by_week, save_recap, get_all_recaps,
+    save_macro_analysis, get_latest_macro,
 )
-from app.llm import query_brain, generate_recap, synthesize_category
+from app.llm import query_brain, generate_recap, synthesize_category, generate_macro_analysis
 
 log = logging.getLogger(__name__)
 
@@ -185,10 +187,14 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 <!-- RECAP -->
 <div class="page" id="page-recap">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-    <div class="section-title" style="margin:0">Weekly Recap</div>
-    <button class="btn" onclick="generateRecap()">Generate new recap</button>
+    <div class="section-title" style="margin:0">Recaps & Analysis</div>
+    <div style="display:flex;gap:8px">
+      <button class="btn" onclick="generateAllRecaps()">Generate all past recaps</button>
+      <button class="btn" style="background:var(--accent2)" onclick="generateMacro()">Macro Analysis</button>
+    </div>
   </div>
-  <div id="recap-content"><div class="loading">Click "Generate new recap" to create your weekly summary</div></div>
+  <div id="macro-content"></div>
+  <div id="recap-list"><div class="loading">Loading recaps...</div></div>
 </div>
 
 </div></div>
@@ -371,18 +377,67 @@ async function sendChat(){
   msgs.scrollTop=msgs.scrollHeight;
 }
 
-// Recap
-async function generateRecap(){
-  const el=document.getElementById('recap-content');
-  el.innerHTML='<div class="section"><div class="loading">Generating weekly recap... (this may take a minute)</div></div>';
-  const r=await api('/generate-recap');
-  el.innerHTML=`<div class="section"><div class="section-header"><div class="section-title">This week</div>
-    <button class="btn btn-sm btn-outline" onclick="copyText(this.closest('.section').querySelector('.synthesis-body').textContent,this)">Copy</button></div>
-    <div class="synthesis-body">${r.text||r.error||'No entries this week'}</div></div>`;
+// Recaps
+async function loadRecaps(){
+  const el=document.getElementById('recap-list');
+  const recaps=await api('/recaps');
+  if(!recaps.length){el.innerHTML='<div class="loading">No recaps yet. Click "Generate all past recaps".</div>';return}
+  el.innerHTML=recaps.map(r=>`
+    <div class="section" style="margin-bottom:12px">
+      <div class="section-header">
+        <div class="section-title">Week of ${r.week_start} (${r.entry_count} entries)</div>
+        <button class="btn btn-sm btn-outline" onclick="copyText(this.closest('.section').querySelector('.synthesis-body').textContent,this)">Copy</button>
+      </div>
+      <div class="synthesis-body">${r.recap||'Empty'}</div>
+    </div>`).join('');
+}
+async function generateAllRecaps(){
+  const el=document.getElementById('recap-list');
+  el.innerHTML='<div class="section"><div class="loading">Generating recaps for all past weeks... This will take several minutes. Don\'t close this page.</div></div>';
+  const r=await api('/generate-all-recaps');
+  el.innerHTML=`<div class="loading">${r.message||r.error}</div>`;
+  setTimeout(loadRecaps,2000);
+}
+async function generateMacro(){
+  const el=document.getElementById('macro-content');
+  el.innerHTML='<div class="section"><div class="loading">Generating macro analysis across all 450+ entries... This may take 1-2 minutes.</div></div>';
+  const r=await api('/generate-macro');
+  el.innerHTML=`<div class="section" style="margin-bottom:20px">
+    <div class="section-header"><div class="section-title">Macro Analysis (${r.entry_count||'?'} entries)</div>
+      <button class="btn btn-sm btn-outline" onclick="copyText(this.closest('.section').querySelector('.synthesis-body').textContent,this)">Copy</button></div>
+    <div class="synthesis-body">${r.text||r.error||'Error'}</div></div>`;
+}
+async function loadMacro(){
+  const r=await api('/macro');
+  if(r&&r.analysis){
+    document.getElementById('macro-content').innerHTML=`<div class="section" style="margin-bottom:20px">
+      <div class="section-header"><div class="section-title">Macro Analysis (${r.entry_count||'?'} entries) — ${r.created_at||''}</div>
+        <div class="badges"><button class="btn btn-sm btn-outline" onclick="copyText(this.closest('.section').querySelector('.synthesis-body').textContent,this)">Copy</button>
+        <button class="btn btn-sm" style="background:var(--accent2)" onclick="generateMacro()">Refresh</button></div></div>
+      <div class="synthesis-body">${r.analysis}</div></div>`;
+  }
 }
 
-loadStats();loadCategories();loadRecent();
+loadStats();loadCategories();loadRecent();loadRecaps();loadMacro();
 </script></body></html>"""
+
+
+async def _generate_all_recaps_bg():
+    """Generate recaps for all past weeks in background."""
+    try:
+        weeks = await get_all_weeks()
+        log.info("Generating recaps for %d weeks...", len(weeks))
+        for w in weeks:
+            ws, we = w["week_start"], w["week_end"]
+            entries = await get_entries_by_week(ws, we)
+            if not entries:
+                continue
+            log.info("Recap for week %s (%d entries)", ws, len(entries))
+            text = await generate_recap(entries)
+            await save_recap(ws, we, text, len(entries))
+        log.info("All recaps generated")
+    except Exception:
+        log.exception("Recap generation failed")
 
 
 async def _get_entry(eid: int) -> dict | None:
@@ -471,6 +526,27 @@ async def handle_request(reader, writer):
             else:
                 text = await synthesize_category(cat, entries)
                 writer.write(_json_resp({"text": text}))
+        elif path == "/api/recaps":
+            writer.write(_json_resp(await get_all_recaps()))
+
+        elif path == "/api/macro":
+            macro = await get_latest_macro()
+            writer.write(_json_resp(macro or {}))
+
+        elif path == "/api/generate-all-recaps":
+            import asyncio as _aio
+            _aio.create_task(_generate_all_recaps_bg())
+            writer.write(_json_resp({"message": "Generating recaps in background. They will appear shortly."}))
+
+        elif path == "/api/generate-macro":
+            entries = await get_recent_entries(days=9999, limit=500)
+            if not entries:
+                writer.write(_json_resp({"error": "No entries"}))
+            else:
+                text = await generate_macro_analysis(entries)
+                await save_macro_analysis(text, len(entries))
+                writer.write(_json_resp({"text": text, "entry_count": len(entries)}))
+
         elif path == "/api/generate-recap":
             entries = await get_recent_entries(days=7, limit=50)
             if not entries:

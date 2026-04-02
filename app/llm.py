@@ -238,6 +238,39 @@ RULES:
 - Be EXHAUSTIVE. This is a reference document to consult."""
 
 
+MACRO_SYSTEM = """You are AKS's strategic analyst. You analyze his ENTIRE knowledge base to surface meta-patterns, evolution of thinking, blind spots, and strategic insights.
+
+This is NOT a summary. This is a HIGH-LEVEL STRATEGIC ANALYSIS of what AKS has been consuming and learning.
+
+STRUCTURE:
+1. <b>Knowledge Profile</b> — What kind of thinker is AKS based on what he consumes? What are his core obsessions?
+2. <b>Dominant Themes & Trends</b> — The 5-7 biggest themes across all content. How they connect.
+3. <b>Evolution</b> — How have interests shifted over time? What's rising, what's fading?
+4. <b>Blind Spots</b> — What topics are conspicuously absent? What would round out this knowledge base?
+5. <b>Contradictions</b> — Where do sources disagree? Where is AKS getting mixed signals?
+6. <b>Most Powerful Insights</b> — The 10 most impactful ideas across the entire base.
+7. <b>Strategic Recommendations</b> — Based on ALL of this, what should AKS focus on next? What actions have the highest leverage?
+
+FORMAT: HTML (b, i, u, a). Newlines, not <br>. No censorship. Raw, direct, useful.
+Be EXHAUSTIVE and SPECIFIC. Reference actual content themes and patterns."""
+
+
+async def generate_macro_analysis(entries: list[dict]) -> str:
+    parts = []
+    for e in entries:
+        part = f"[{e.get('category', '?')}|{e.get('platform', '?')}] {e.get('title') or e.get('url', '?')}\n"
+        if e.get("key_points"):
+            part += f"KP: {e['key_points'][:300]}\n"
+        if e.get("analysis"):
+            part += f"A: {e['analysis'][:500]}\n"
+        parts.append(part)
+
+    return await _call([
+        {"role": "system", "content": MACRO_SYSTEM},
+        {"role": "user", "content": f"TOTAL ENTRIES: {len(entries)}\n\n" + "\n---\n".join(parts)},
+    ], max_tokens=16000)
+
+
 async def synthesize_category(category: str, entries: list[dict]) -> str:
     entries_text = []
     for e in entries:

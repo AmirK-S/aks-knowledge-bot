@@ -48,6 +48,22 @@ async def _init_tables(db: aiosqlite.Connection):
             tokenize='unicode61 remove_diacritics 2'
         );
 
+        CREATE TABLE IF NOT EXISTS recaps (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            week_start TEXT NOT NULL UNIQUE,
+            week_end TEXT NOT NULL,
+            entry_count INTEGER DEFAULT 0,
+            recap TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS macro_analysis (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            analysis TEXT,
+            entry_count INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
         CREATE TRIGGER IF NOT EXISTS entries_ai AFTER INSERT ON entries BEGIN
             INSERT INTO entries_fts(rowid, url, title, raw_transcript, analysis, key_points, category)
             VALUES (new.id, new.url, new.title, new.raw_transcript, new.analysis, new.key_points, new.category);
@@ -167,6 +183,64 @@ async def get_entry_by_url(url: str) -> dict | None:
     db = await get_db()
     rows = await db.execute_fetchall(
         "SELECT * FROM entries WHERE url = ?", (url,)
+    )
+    return dict(rows[0]) if rows else None
+
+
+async def get_entries_by_week(week_start: str, week_end: str) -> list[dict]:
+    db = await get_db()
+    rows = await db.execute_fetchall(
+        "SELECT * FROM entries WHERE created_at >= ? AND created_at < ? ORDER BY created_at",
+        (week_start, week_end),
+    )
+    return [dict(r) for r in rows]
+
+
+async def get_all_weeks() -> list[dict]:
+    """Get all weeks that have entries."""
+    db = await get_db()
+    rows = await db.execute_fetchall(
+        """SELECT
+            date(created_at, 'weekday 0', '-6 days') as week_start,
+            date(created_at, 'weekday 0', '+1 day') as week_end,
+            COUNT(*) as cnt
+           FROM entries
+           GROUP BY week_start
+           ORDER BY week_start DESC"""
+    )
+    return [dict(r) for r in rows]
+
+
+async def save_recap(week_start: str, week_end: str, recap: str, entry_count: int):
+    db = await get_db()
+    await db.execute(
+        """INSERT INTO recaps (week_start, week_end, recap, entry_count)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(week_start) DO UPDATE SET recap=excluded.recap, entry_count=excluded.entry_count""",
+        (week_start, week_end, recap, entry_count),
+    )
+    await db.commit()
+
+
+async def get_all_recaps() -> list[dict]:
+    db = await get_db()
+    rows = await db.execute_fetchall("SELECT * FROM recaps ORDER BY week_start DESC")
+    return [dict(r) for r in rows]
+
+
+async def save_macro_analysis(analysis: str, entry_count: int):
+    db = await get_db()
+    await db.execute(
+        "INSERT INTO macro_analysis (analysis, entry_count) VALUES (?, ?)",
+        (analysis, entry_count),
+    )
+    await db.commit()
+
+
+async def get_latest_macro() -> dict | None:
+    db = await get_db()
+    rows = await db.execute_fetchall(
+        "SELECT * FROM macro_analysis ORDER BY created_at DESC LIMIT 1"
     )
     return dict(rows[0]) if rows else None
 
