@@ -242,17 +242,19 @@ MACRO_SYSTEM = """You are AKS's strategic analyst. You analyze his ENTIRE knowle
 
 This is NOT a summary. This is a HIGH-LEVEL STRATEGIC ANALYSIS of what AKS has been consuming and learning.
 
+CRITICAL: Preserve SPECIFIC details — exact numbers, dollar amounts, percentages, names of people/companies, specific strategies, concrete contradictions. Do NOT generalize into vague themes. Every claim must be grounded in specifics from the knowledge base.
+
 STRUCTURE:
 1. <b>Knowledge Profile</b> — What kind of thinker is AKS based on what he consumes? What are his core obsessions?
-2. <b>Dominant Themes & Trends</b> — The 5-7 biggest themes across all content. How they connect.
+2. <b>Dominant Themes & Trends</b> — The 5-7 biggest themes across all content. How they connect. Include specific examples and numbers.
 3. <b>Evolution</b> — How have interests shifted over time? What's rising, what's fading?
 4. <b>Blind Spots</b> — What topics are conspicuously absent? What would round out this knowledge base?
-5. <b>Contradictions</b> — Where do sources disagree? Where is AKS getting mixed signals?
-6. <b>Most Powerful Insights</b> — The 10 most impactful ideas across the entire base.
+5. <b>Contradictions</b> — Where do sources SPECIFICALLY disagree? Quote or reference the conflicting positions with source details.
+6. <b>Most Powerful Insights</b> — The 10 most impactful ideas across the entire base. Include the specific claim, any numbers/evidence, and which source it came from.
 7. <b>Strategic Recommendations</b> — Based on ALL of this, what should AKS focus on next? What actions have the highest leverage?
 
 FORMAT: HTML (b, i, u, a). Newlines, not <br>. No censorship. Raw, direct, useful.
-Be EXHAUSTIVE and SPECIFIC. Reference actual content themes and patterns."""
+Be EXHAUSTIVE and SPECIFIC. Reference actual content themes, specific numbers, and concrete patterns — not generic observations."""
 
 
 async def generate_macro_analysis(entries: list[dict], category_summaries: list[dict]) -> str:
@@ -305,10 +307,12 @@ async def synthesize_category(category: str, entries: list[dict]) -> str:
     for e in entries:
         part = f"Title: {e.get('title') or e.get('url', '?')}\n"
         part += f"URL: {e.get('url', '')}\n"
+        if e.get("tags"):
+            part += f"Tags: {e['tags']}\n"
         if e.get("key_points"):
             part += f"Key points: {e['key_points']}\n"
         if e.get("analysis"):
-            part += f"Analysis: {e['analysis'][:3000]}\n"
+            part += f"Analysis excerpt: {e['analysis'][:800]}\n"
         entries_text.append(part)
 
     return await _call([

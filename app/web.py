@@ -436,6 +436,16 @@ async def _generate_macro_bg():
             entries = await get_category_entries_for_summary(cat_name)
             if not entries:
                 continue
+            # For macro synthesis, only pass key_points + title + tags (not full analysis)
+            lean_entries = []
+            for e in entries:
+                lean_entries.append({
+                    "title": e.get("title"),
+                    "url": e.get("url"),
+                    "key_points": e.get("key_points"),
+                    "tags": e.get("tags"),
+                })
+            entries = lean_entries
             log.info("Macro pass 1: summarizing %s (%d entries)", cat_name, len(entries))
             summary = await synthesize_category(cat_name, entries)
             category_summaries.append({
@@ -454,18 +464,50 @@ async def _generate_macro_bg():
 
 
 async def _generate_all_recaps_bg():
-    """Generate recaps for all past weeks in background."""
+    """Generate recaps for all past weeks in background.
+
+    Weeks with fewer than 3 entries are aggregated into monthly recaps instead.
+    """
     try:
         weeks = await get_all_weeks()
         log.info("Generating recaps for %d weeks...", len(weeks))
+
+        # Separate weeks with enough entries from sparse weeks
+        sparse_by_month: dict[str, list[dict]] = {}
+
         for w in weeks:
             ws, we = w["week_start"], w["week_end"]
             entries = await get_entries_by_week(ws, we)
             if not entries:
                 continue
-            log.info("Recap for week %s (%d entries)", ws, len(entries))
+
+            if len(entries) >= 3:
+                # Normal weekly recap
+                log.info("Recap for week %s (%d entries)", ws, len(entries))
+                text = await generate_recap(entries)
+                await save_recap(ws, we, text, len(entries))
+            else:
+                # Sparse week — aggregate by month
+                month_key = ws[:7]  # "YYYY-MM"
+                if month_key not in sparse_by_month:
+                    sparse_by_month[month_key] = []
+                sparse_by_month[month_key].extend(entries)
+
+        # Generate monthly recaps for sparse periods
+        for month_key, entries in sparse_by_month.items():
+            if not entries:
+                continue
+            month_start = f"{month_key}-01"
+            # End of month: use first day of next month
+            year, mon = int(month_key[:4]), int(month_key[5:7])
+            if mon == 12:
+                month_end = f"{year + 1}-01-01"
+            else:
+                month_end = f"{year}-{mon + 1:02d}-01"
+            log.info("Monthly recap for %s (%d sparse entries)", month_key, len(entries))
             text = await generate_recap(entries)
-            await save_recap(ws, we, text, len(entries))
+            await save_recap(month_start, month_end, text, len(entries))
+
         log.info("All recaps generated")
     except Exception:
         log.exception("Recap generation failed")

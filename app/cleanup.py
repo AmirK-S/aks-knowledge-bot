@@ -1,10 +1,11 @@
-"""Clean up migrated data — fix categories and fetch missing titles."""
+"""Clean up migrated data — fix categories, dates, duplicates, and fetch missing titles."""
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
 import re
+from datetime import datetime
 
 from app.database import get_db
 
@@ -260,16 +261,101 @@ def _extract_title_from_content(analysis: str, transcript: str, url: str, platfo
     return None
 
 
+async def fix_dates():
+    """Re-import real dates from Google Sheet into SQLite entries."""
+    from app.sheets import read_all_from_sheet
+
+    db = await get_db()
+    updated = 0
+
+    for tab in ("Reels", "Youtube"):
+        try:
+            rows = await read_all_from_sheet(tab)
+        except Exception:
+            log.exception("Failed to read sheet tab %s", tab)
+            continue
+
+        for row in rows:
+            url = (row.get("url") or row.get("lien") or "").strip()
+            date_str = (row.get("date") or "").strip()
+            if not url or not date_str:
+                continue
+
+            # Parse "DD/MM/YYYY - HH:MM" format
+            try:
+                parsed = datetime.strptime(date_str, "%d/%m/%Y - %H:%M")
+            except ValueError:
+                # Try without time
+                try:
+                    parsed = datetime.strptime(date_str, "%d/%m/%Y")
+                except ValueError:
+                    log.debug("Cannot parse date '%s' for %s", date_str, url)
+                    continue
+
+            iso_date = parsed.strftime("%Y-%m-%d %H:%M:%S")
+            result = await db.execute(
+                "UPDATE entries SET created_at = ? WHERE url = ?",
+                (iso_date, url),
+            )
+            if result.rowcount > 0:
+                updated += 1
+
+    if updated:
+        await db.commit()
+        log.info("Fixed dates for %d entries from Google Sheet", updated)
+    else:
+        log.info("No dates to fix (0 matches)")
+
+
+async def deduplicate_entries():
+    """Remove duplicate entries (same URL), keeping the one with the longest analysis."""
+    db = await get_db()
+
+    # Find URLs that appear more than once
+    dupes = await db.execute_fetchall(
+        "SELECT url, COUNT(*) as cnt FROM entries WHERE url IS NOT NULL GROUP BY url HAVING cnt > 1"
+    )
+
+    deleted = 0
+    for row in dupes:
+        url = row["url"]
+        # Get all entries for this URL, ordered by analysis length desc
+        entries = await db.execute_fetchall(
+            "SELECT id, LENGTH(COALESCE(analysis, '')) as alen FROM entries WHERE url = ? ORDER BY alen DESC",
+            (url,),
+        )
+        # Keep the first (longest analysis), delete the rest
+        ids_to_delete = [e["id"] for e in entries[1:]]
+        if ids_to_delete:
+            placeholders = ",".join("?" for _ in ids_to_delete)
+            await db.execute(
+                f"DELETE FROM entries WHERE id IN ({placeholders})",
+                ids_to_delete,
+            )
+            deleted += len(ids_to_delete)
+
+    if deleted:
+        await db.commit()
+        log.info("Deduplicated: removed %d duplicate entries", deleted)
+    else:
+        log.info("No duplicate entries found")
+
+
 async def run_cleanup():
     """Run all cleanup tasks."""
     log.info("Running data cleanup...")
     await cleanup_categories()
-    # Fetch titles in background to not block startup
-    asyncio.create_task(_fetch_titles_bg())
+    await deduplicate_entries()
+    # Fix dates and fetch titles in background to not block startup
+    asyncio.create_task(_cleanup_bg())
 
 
-async def _fetch_titles_bg():
-    """Background task to generate titles."""
+async def _cleanup_bg():
+    """Background cleanup tasks (dates + titles)."""
+    try:
+        await fix_dates()
+    except Exception:
+        log.exception("Date fix failed")
     try:
         await generate_missing_titles()
     except Exception:
