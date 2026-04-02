@@ -148,7 +148,7 @@ def _infer_category(transcript: str, analysis: str) -> str:
 
 
 async def fetch_missing_titles():
-    """Fetch titles for entries that don't have one, using yt-dlp."""
+    """Fetch titles for entries that don't have one, using yt-dlp in parallel."""
     db = await get_db()
     rows = await db.execute_fetchall(
         "SELECT id, url, platform FROM entries WHERE (title IS NULL OR title = '') AND url IS NOT NULL"
@@ -159,24 +159,23 @@ async def fetch_missing_titles():
     log.info("Fetching titles for %d entries...", len(rows))
     updated = 0
 
-    for row in rows:
-        url = row["url"]
-        platform = row["platform"]
+    # Process in batches of 10 concurrent
+    batch_size = 10
+    for i in range(0, len(rows), batch_size):
+        batch = rows[i:i + batch_size]
+        tasks = [_get_title(row["url"], row["platform"]) for row in batch]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        try:
-            title = await _get_title(url, platform)
-            if title:
+        for row, result in zip(batch, results):
+            if isinstance(result, str) and result:
                 await db.execute(
-                    "UPDATE entries SET title = ? WHERE id = ?", (title, row["id"])
+                    "UPDATE entries SET title = ? WHERE id = ?", (result, row["id"])
                 )
                 updated += 1
-                if updated % 20 == 0:
-                    await db.commit()
-                    log.info("Fetched %d/%d titles", updated, len(rows))
-        except Exception:
-            pass  # Skip failures silently
 
-        await asyncio.sleep(0.1)
+        if updated > 0 and i % 50 == 0:
+            await db.commit()
+            log.info("Fetched %d/%d titles", updated, len(rows))
 
     await db.commit()
     log.info("Fetched %d titles total", updated)
@@ -189,9 +188,11 @@ async def _get_title(url: str, platform: str | None) -> str | None:
             "yt-dlp", "--get-title", "--no-warnings", "--no-download", url,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=20)
         title = stdout.decode().strip().split("\n")[0] if stdout else None
-        return title if title and len(title) > 1 else None
+        if title and len(title) > 1 and title != "watch":
+            return title
+        return None
     except (asyncio.TimeoutError, Exception):
         return None
 
