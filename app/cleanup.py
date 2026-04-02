@@ -147,54 +147,75 @@ def _infer_category(transcript: str, analysis: str) -> str:
     return _infer_from_text(text)
 
 
-async def fetch_missing_titles():
-    """Fetch titles for entries that don't have one, using yt-dlp in parallel."""
+async def generate_missing_titles():
+    """Generate titles from analysis text for entries without titles."""
     db = await get_db()
     rows = await db.execute_fetchall(
-        "SELECT id, url, platform FROM entries WHERE (title IS NULL OR title = '') AND url IS NOT NULL"
+        "SELECT id, url, platform, analysis, raw_transcript, category FROM entries WHERE (title IS NULL OR title = '') AND url IS NOT NULL"
     )
     if not rows:
         return
 
-    log.info("Fetching titles for %d entries...", len(rows))
+    log.info("Generating titles for %d entries...", len(rows))
     updated = 0
 
-    # Process in batches of 10 concurrent
-    batch_size = 10
-    for i in range(0, len(rows), batch_size):
-        batch = rows[i:i + batch_size]
-        tasks = [_get_title(row["url"], row["platform"]) for row in batch]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        for row, result in zip(batch, results):
-            if isinstance(result, str) and result:
-                await db.execute(
-                    "UPDATE entries SET title = ? WHERE id = ?", (result, row["id"])
-                )
-                updated += 1
-
-        if updated > 0 and i % 50 == 0:
-            await db.commit()
-            log.info("Fetched %d/%d titles", updated, len(rows))
+    for row in rows:
+        r = dict(row)
+        title = _extract_title_from_content(
+            r.get("analysis") or "",
+            r.get("raw_transcript") or "",
+            r.get("url") or "",
+            r.get("platform") or "",
+            r.get("category") or "",
+        )
+        if title:
+            await db.execute("UPDATE entries SET title = ? WHERE id = ?", (title, r["id"]))
+            updated += 1
 
     await db.commit()
-    log.info("Fetched %d titles total", updated)
+    log.info("Generated %d titles", updated)
 
 
-async def _get_title(url: str, platform: str | None) -> str | None:
-    """Get title using yt-dlp --get-title."""
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "yt-dlp", "--get-title", "--no-warnings", "--no-download", url,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=20)
-        title = stdout.decode().strip().split("\n")[0] if stdout else None
-        if title and len(title) > 1 and title != "watch":
-            return title
-        return None
-    except (asyncio.TimeoutError, Exception):
-        return None
+def _extract_title_from_content(analysis: str, transcript: str, url: str, platform: str, category: str) -> str | None:
+    """Extract a meaningful title from the analysis or transcript."""
+    # Try to find the first <b>...</b> tag in analysis (usually "Core value extraction")
+    # Skip generic headers, look for the SECOND bold section which is usually the topic
+    import re
+    bold_matches = re.findall(r"<b>([^<]+)</b>", analysis)
+    for match in bold_matches:
+        # Skip generic headers
+        if match.lower() in ("core value extraction", "complete breakdown", "critical caveats",
+                              "practical extraction", "evidence cited", "notable formulations",
+                              "source", "key ideas", "playbook", "critical caveats & failure modes",
+                              "critical caveats &amp; failure modes"):
+            continue
+        if len(match) > 5 and len(match) < 100:
+            return match.strip()
+
+    # Try first meaningful sentence of analysis
+    if analysis:
+        # Remove HTML tags
+        clean = re.sub(r"<[^>]+>", "", analysis)
+        # Get first sentence
+        sentences = re.split(r"[.!?\n]", clean)
+        for s in sentences:
+            s = s.strip()
+            if len(s) > 15 and len(s) < 120:
+                return s
+
+    # Try first sentence of transcript
+    if transcript:
+        sentences = re.split(r"[.!?\n]", transcript[:500])
+        for s in sentences:
+            s = s.strip()
+            if len(s) > 15 and len(s) < 100:
+                return s
+
+    # Fallback: platform + category
+    if category:
+        return f"{category.title()} — {platform or 'video'}"
+
+    return None
 
 
 async def run_cleanup():
@@ -206,8 +227,8 @@ async def run_cleanup():
 
 
 async def _fetch_titles_bg():
-    """Background task to fetch titles."""
+    """Background task to generate titles."""
     try:
-        await fetch_missing_titles()
+        await generate_missing_titles()
     except Exception:
-        log.exception("Title fetch failed")
+        log.exception("Title generation failed")
