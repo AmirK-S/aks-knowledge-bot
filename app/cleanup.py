@@ -148,32 +148,67 @@ def _infer_category(transcript: str, analysis: str) -> str:
 
 
 async def generate_missing_titles():
-    """Generate titles from analysis text for entries without titles."""
+    """Fetch real titles via YouTube oEmbed API or extract from content."""
+    import httpx
+
     db = await get_db()
+    # Fetch all YouTube titles (oEmbed is fast and free) + missing titles for others
     rows = await db.execute_fetchall(
-        "SELECT id, url, platform, analysis, raw_transcript, category FROM entries WHERE (title IS NULL OR title = '') AND url IS NOT NULL"
+        """SELECT id, url, platform, analysis, raw_transcript, category FROM entries
+           WHERE url IS NOT NULL AND (
+             platform = 'youtube'
+             OR title IS NULL OR title = ''
+           )"""
     )
     if not rows:
         return
 
-    log.info("Generating titles for %d entries...", len(rows))
+    log.info("Fetching titles for %d entries...", len(rows))
     updated = 0
 
-    for row in rows:
-        r = dict(row)
-        title = _extract_title_from_content(
-            r.get("analysis") or "",
-            r.get("raw_transcript") or "",
-            r.get("url") or "",
-            r.get("platform") or "",
-            r.get("category") or "",
-        )
-        if title:
-            await db.execute("UPDATE entries SET title = ? WHERE id = ?", (title, r["id"]))
-            updated += 1
+    async with httpx.AsyncClient(timeout=10) as client:
+        for row in rows:
+            r = dict(row)
+            url = r.get("url", "")
+            platform = r.get("platform", "")
+            title = None
+
+            # YouTube: use oEmbed API (free, no auth)
+            if platform == "youtube":
+                title = await _youtube_title(client, url)
+
+            # Fallback: extract from analysis
+            if not title:
+                title = _extract_title_from_content(
+                    r.get("analysis") or "",
+                    r.get("raw_transcript") or "",
+                    url, platform,
+                    r.get("category") or "",
+                )
+
+            if title:
+                await db.execute("UPDATE entries SET title = ? WHERE id = ?", (title, r["id"]))
+                updated += 1
 
     await db.commit()
-    log.info("Generated %d titles", updated)
+    log.info("Fetched %d titles", updated)
+
+
+async def _youtube_title(client, url: str) -> str | None:
+    """Get YouTube video title via oEmbed API."""
+    try:
+        resp = await client.get(
+            "https://www.youtube.com/oembed",
+            params={"url": url, "format": "json"},
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            title = data.get("title", "")
+            if title and len(title) > 1:
+                return title
+    except Exception:
+        pass
+    return None
 
 
 SKIP_TITLES = {
