@@ -351,31 +351,29 @@ async function loadDetail(id){
         <a href="${e.url}" target="_blank" style="font-size:.75rem">Open original</a>
       </div>
     </div>
-    <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap">
-      <div style="flex-shrink:0">${getPlayer(e.url,e.platform)}</div>
-      <div style="flex:1;min-width:300px">
+    <div style="display:flex;gap:20px;align-items:flex-start">
+      <div style="flex-shrink:0;position:sticky;top:20px">${getPlayer(e.url,e.platform)}</div>
+      <div style="flex:1;min-width:0;overflow-y:auto">
         ${kp.length?`<div class="section"><div class="section-title">Key Points</div><ul class="key-points">${kp.map(p=>'<li>'+p+'</li>').join('')}</ul></div>`:''}
-      </div>
-    </div>
-    <div class="section">
-      <div class="section-header"><div class="section-title">Analysis</div><div class="badges">
-        <button class="btn btn-sm btn-outline" id="translate-btn-${e.id}" onclick="translateSection(${e.id},'analysis',this)">FR</button>
-        <button class="btn btn-sm btn-outline" onclick="copyText(document.getElementById('a-raw').textContent,this)">Copy</button>
-        <button class="btn btn-sm btn-outline" onclick="downloadText(document.getElementById('a-raw').textContent,'analysis.txt')">Download</button>
-      </div></div>
-      <div class="section-body">${analysis||'<span style="color:var(--muted)">No analysis</span>'}</div>
-      <pre id="a-raw" style="display:none">${(e.analysis||'').replace(/</g,'&lt;')}</pre>
-      <div id="translate-result-${e.id}"></div>
-    </div>
-    ${e.raw_transcript?`<div class="section">
-      <div class="section-header"><div class="section-title">Transcript</div><div class="badges">
-        <button class="btn btn-sm btn-outline" onclick="copyText(document.getElementById('t-raw').textContent,this)">Copy</button>
-        <button class="btn btn-sm btn-outline" onclick="downloadText(document.getElementById('t-raw').textContent,'transcript.txt')">Download</button>
-      </div></div>
-      <div class="section-body" id="t-raw" style="max-height:250px;overflow-y:auto;font-size:.8rem;color:var(--muted)">${e.raw_transcript.replace(/</g,'&lt;')}</div>
-    </div>`:''}
-    <div class="section">
-      <div class="section-title">Rewrite</div>
+        <div class="section">
+          <div class="section-header"><div class="section-title">Analysis</div><div class="badges">
+            <button class="btn btn-sm btn-outline" id="translate-btn-${e.id}" onclick="translateSection(${e.id},'analysis',this)">FR</button>
+            <button class="btn btn-sm btn-outline" onclick="copyText(document.getElementById('a-raw').textContent,this)">Copy</button>
+            <button class="btn btn-sm btn-outline" onclick="downloadText(document.getElementById('a-raw').textContent,'analysis.txt')">Download</button>
+          </div></div>
+          <div class="section-body">${analysis||'<span style="color:var(--muted)">No analysis</span>'}</div>
+          <pre id="a-raw" style="display:none">${(e.analysis||'').replace(/</g,'&lt;')}</pre>
+          <div id="translate-result-${e.id}"></div>
+        </div>
+        ${e.raw_transcript?`<div class="section">
+          <div class="section-header"><div class="section-title">Transcript</div><div class="badges">
+            <button class="btn btn-sm btn-outline" onclick="copyText(document.getElementById('t-raw').textContent,this)">Copy</button>
+            <button class="btn btn-sm btn-outline" onclick="downloadText(document.getElementById('t-raw').textContent,'transcript.txt')">Download</button>
+          </div></div>
+          <div class="section-body" id="t-raw" style="max-height:250px;overflow-y:auto;font-size:.8rem;color:var(--muted)">${e.raw_transcript.replace(/</g,'&lt;')}</div>
+        </div>`:''}
+        <div class="section">
+          <div class="section-title">Rewrite</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-sm btn-outline" onclick="rewrite(${id},'short')">Short</button>
         <button class="btn btn-sm btn-outline" onclick="rewrite(${id},'pragmatic')">Pragmatic</button>
@@ -383,7 +381,9 @@ async function loadDetail(id){
         <button class="btn btn-sm btn-outline" onclick="rewrite(${id},'detailed')">Full detailed</button>
       </div>
       <div id="rewrite-result" style="margin-top:12px"></div>
-    </div>`;
+    </div>
+    </div><!-- close right column -->
+    </div><!-- close flex container -->`;
 }
 async function rewrite(id,style){
   const el=document.getElementById('rewrite-result');
