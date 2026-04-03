@@ -1,6 +1,7 @@
 """Web dashboard for AKS Knowledge Brain — v2."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import secrets
@@ -124,12 +125,25 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .synthesis-body{font-size:.85rem;line-height:1.7;color:#ccc;white-space:pre-wrap;word-break:break-word}
 .synthesis-body b{color:var(--accent)}
 .loading{text-align:center;padding:40px;color:var(--muted)}
+/* Collapsible recap cards */
+.recap-card{background:var(--s1);border:1px solid var(--border);border-radius:12px;margin-bottom:12px;overflow:hidden}
+.recap-header{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;cursor:pointer;user-select:none;transition:background .15s}
+.recap-header:hover{background:var(--s2)}
+.recap-header .chevron{transition:transform .25s;color:var(--muted);font-size:.85rem}
+.recap-card.open .recap-header .chevron{transform:rotate(90deg)}
+.recap-body{max-height:0;overflow:hidden;transition:max-height .35s ease}
+.recap-card.open .recap-body{max-height:5000px}
+.recap-body-inner{padding:0 20px 20px}
+/* Lang toggle */
+.lang-toggle{display:inline-block;padding:6px 14px;border-radius:8px;font-size:.75rem;font-weight:600;cursor:pointer;border:1px solid var(--border);color:var(--muted);background:transparent;transition:border-color .15s,color .15s;margin-bottom:16px}
+.lang-toggle:hover{border-color:var(--accent);color:var(--accent)}
 @media(max-width:768px){.sidebar{display:none}.main{margin-left:0}}
 </style></head>
 <body>
 <div class="app">
 <nav class="sidebar">
   <h1>AKS Brain</h1><p class="sub">Knowledge Base</p>
+  <button class="lang-toggle" id="lang-btn" onclick="toggleLang()">FR / EN</button>
   <a class="nav-item active" onclick="showPage('home')" data-page="home">Home</a>
   <a class="nav-item" onclick="showPage('chat')" data-page="chat">Ask Brain</a>
   <a class="nav-item" onclick="showPage('recap')" data-page="recap">Weekly Recap</a>
@@ -200,7 +214,24 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 </div></div>
 
 <script>
-async function api(path,opts){const r=await fetch('/api'+path,opts);return r.json()}
+// Language toggle
+let currentLang=localStorage.getItem('brain_lang')||'en';
+function getLangParam(){return currentLang==='fr'?'lang=fr':'lang=en'}
+function toggleLang(){
+  currentLang=currentLang==='en'?'fr':'en';
+  localStorage.setItem('brain_lang',currentLang);
+  updateLangBtn();
+}
+function updateLangBtn(){
+  const btn=document.getElementById('lang-btn');
+  if(btn)btn.textContent=currentLang==='fr'?'Langue: FR':'Language: EN';
+}
+
+async function api(path,opts){
+  const sep=path.includes('?')?'&':'?';
+  const r=await fetch('/api'+path+sep+getLangParam(),opts);
+  return r.json();
+}
 let currentCat='',allCatEntries=[];
 
 function showPage(p,skipNav){
@@ -360,35 +391,57 @@ async function loadDetail(id){
 }
 async function rewrite(id,style){
   const el=document.getElementById('rewrite-result');
-  el.innerHTML='<div class="loading">Rewriting...</div>';
+  const loadDiv=document.createElement('div');
+  loadDiv.className='loading';loadDiv.textContent='Rewriting ('+style+')...';
+  el.appendChild(loadDiv);
   const r=await api('/rewrite/'+id+'?style='+style);
-  el.innerHTML=`<div class="section-body" style="margin-top:8px">${r.text||r.error||'Error'}</div>
+  loadDiv.remove();
+  const styleLabels={short:'Short version',pragmatic:'Pragmatic version',bullets:'Bullet points',detailed:'Full detailed version'};
+  const wrapper=document.createElement('div');
+  wrapper.style.cssText='margin-top:12px;padding-top:12px;border-top:1px solid var(--border)';
+  wrapper.innerHTML=`<div style="font-weight:600;font-size:.85rem;color:var(--accent);margin-bottom:6px">${styleLabels[style]||style}</div>
+    <div class="section-body">${r.text||r.error||'Error'}</div>
     <button class="btn btn-sm btn-outline" style="margin-top:8px" onclick="copyText(this.previousElementSibling.textContent,this)">Copy</button>`;
+  el.appendChild(wrapper);
 }
 
 // Chat
+let chatHistory=[];
 async function sendChat(){
   const input=document.getElementById('chatInput');const q=input.value.trim();if(!q)return;input.value='';
   const msgs=document.getElementById('chat-messages');
   msgs.innerHTML+=`<div class="chat-msg user">${q}</div><div class="chat-msg bot" id="chat-loading">Thinking...</div>`;
   msgs.scrollTop=msgs.scrollHeight;
-  const r=await api('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})});
-  document.getElementById('chat-loading').outerHTML=`<div class="chat-msg bot">${r.answer||r.error||'Error'}</div>`;
+  chatHistory.push({role:'user',content:q});
+  const lastFive=chatHistory.slice(-10);
+  const r=await api('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,history:lastFive})});
+  const answer=r.answer||r.error||'Error';
+  chatHistory.push({role:'assistant',content:answer});
+  document.getElementById('chat-loading').outerHTML=`<div class="chat-msg bot">${answer}</div>`;
   msgs.scrollTop=msgs.scrollHeight;
 }
 
 // Recaps
+function toggleRecap(header){
+  const card=header.closest('.recap-card');
+  card.classList.toggle('open');
+}
 async function loadRecaps(){
   const el=document.getElementById('recap-list');
   const recaps=await api('/recaps');
   if(!recaps.length){el.innerHTML='<div class="loading">No recaps yet. Click "Generate all past recaps".</div>';return}
   el.innerHTML=recaps.map(r=>`
-    <div class="section" style="margin-bottom:12px">
-      <div class="section-header">
-        <div class="section-title">Week of ${r.week_start} (${r.entry_count} entries)</div>
-        <button class="btn btn-sm btn-outline" onclick="copyText(this.closest('.section').querySelector('.synthesis-body').textContent,this)">Copy</button>
+    <div class="recap-card">
+      <div class="recap-header" onclick="toggleRecap(this)">
+        <div class="section-title" style="margin:0">Week of ${r.week_start} (${r.entry_count} entries)</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn btn-sm btn-outline" onclick="event.stopPropagation();copyText(this.closest('.recap-card').querySelector('.synthesis-body').textContent,this)">Copy</button>
+          <span class="chevron">&#9654;</span>
+        </div>
       </div>
-      <div class="synthesis-body">${r.recap||'Empty'}</div>
+      <div class="recap-body"><div class="recap-body-inner">
+        <div class="synthesis-body">${r.recap||'Empty'}</div>
+      </div></div>
     </div>`).join('');
 }
 async function generateAllRecaps(){
@@ -408,16 +461,20 @@ async function generateMacro(){
     <div class="synthesis-body">${r.text||r.error||'Error'}</div></div>`;
 }
 async function loadMacro(){
-  const r=await api('/macro');
-  if(r&&r.analysis){
-    document.getElementById('macro-content').innerHTML=`<div class="section" style="margin-bottom:20px">
-      <div class="section-header"><div class="section-title">Macro Analysis (${r.entry_count||'?'} entries) — ${r.created_at||''}</div>
-        <div class="badges"><button class="btn btn-sm btn-outline" onclick="copyText(this.closest('.section').querySelector('.synthesis-body').textContent,this)">Copy</button>
-        <button class="btn btn-sm" style="background:var(--accent2)" onclick="generateMacro()">Refresh</button></div></div>
-      <div class="synthesis-body">${r.analysis}</div></div>`;
-  }
+  try{
+    const r=await api('/macro');
+    if(r&&r.analysis&&r.analysis.length>0){
+      const el=document.getElementById('macro-content');
+      el.innerHTML=`<div class="section" style="margin-bottom:20px">
+        <div class="section-header"><div class="section-title">Macro Analysis (${r.entry_count||'?'} entries) — ${r.created_at||''}</div>
+          <div class="badges"><button class="btn btn-sm btn-outline" onclick="copyText(this.closest('.section').querySelector('.synthesis-body').textContent,this)">Copy</button>
+          <button class="btn btn-sm" style="background:var(--accent2)" onclick="generateMacro()">Refresh</button></div></div>
+        <div class="synthesis-body">${r.analysis}</div></div>`;
+    }
+  }catch(e){console.error('loadMacro error',e)}
 }
 
+updateLangBtn();
 loadStats();loadCategories();loadRecent();loadRecaps();loadMacro();
 </script></body></html>"""
 
@@ -607,13 +664,11 @@ async def handle_request(reader, writer):
             writer.write(_json_resp(macro or {}))
 
         elif path == "/api/generate-all-recaps":
-            import asyncio as _aio
-            _aio.create_task(_generate_all_recaps_bg())
+            asyncio.create_task(_generate_all_recaps_bg())
             writer.write(_json_resp({"message": "Generating recaps in background. They will appear shortly."}))
 
         elif path == "/api/generate-macro":
-            import asyncio as _aio
-            _aio.create_task(_generate_macro_bg())
+            asyncio.create_task(_generate_macro_bg())
             writer.write(_json_resp({"text": "Macro analysis started in background. Generating category summaries first, then global analysis. Refresh in 2-3 minutes.", "entry_count": 0}))
 
         elif path == "/api/generate-recap":
@@ -626,11 +681,50 @@ async def handle_request(reader, writer):
         elif path == "/api/chat" and method == "POST":
             body = json.loads(_get_body(raw))
             question = body.get("question", "")
-            entries = await search_entries(question, limit=8)
-            if not entries:
-                entries = await get_recent_entries(days=60, limit=10)
-            answer = await query_brain(question, entries)
-            writer.write(_json_resp({"answer": answer}))
+            history = body.get("history", [])
+
+            # Handle simple greetings without calling the full search pipeline
+            _greetings = {"hi", "hello", "hey", "salut", "yo", "bonjour", "coucou", "sup", "wesh", "slt"}
+            words = question.lower().split()
+            if len(words) < 5 and any(w.strip("!?,. ") in _greetings for w in words):
+                from app.llm import _call
+                try:
+                    greeting_answer = await asyncio.wait_for(
+                        _call([
+                            {"role": "system", "content": "You are AKS's knowledge brain assistant. Respond to greetings briefly and naturally. Match the user's language (French/English). Keep it short — 1-2 sentences. Mention you can help search the knowledge base."},
+                            {"role": "user", "content": question},
+                        ], max_tokens=256),
+                        timeout=30,
+                    )
+                except asyncio.TimeoutError:
+                    greeting_answer = "Hey! Ask me anything about your knowledge base."
+                writer.write(_json_resp({"answer": greeting_answer}))
+            else:
+                try:
+                    entries = await search_entries(question, limit=8)
+                    if not entries:
+                        entries = await get_recent_entries(days=60, limit=10)
+
+                    # Build source citations
+                    sources = []
+                    for e in entries[:5]:
+                        title = e.get("title") or e.get("url", "")
+                        url = e.get("url", "")
+                        if title and url:
+                            sources.append(f'<a href="{url}">{title}</a>')
+
+                    answer = await asyncio.wait_for(
+                        query_brain(question, entries, history=history[-10:] if history else None),
+                        timeout=30,
+                    )
+
+                    # Append source citations
+                    if sources:
+                        answer += "\n\n<b>Sources:</b>\n" + "\n".join(f"- {s}" for s in sources)
+
+                    writer.write(_json_resp({"answer": answer}))
+                except asyncio.TimeoutError:
+                    writer.write(_json_resp({"answer": "Sorry, the request timed out. Try a simpler question or try again.", "error": "timeout"}))
         else:
             writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\n\r\nNot Found")
         await writer.drain()

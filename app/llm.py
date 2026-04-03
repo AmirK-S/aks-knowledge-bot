@@ -158,7 +158,12 @@ RULES:
 - Match the user's language (French → French, English → English)."""
 
 
-async def query_brain(question: str, context_entries: list[dict], detail_level: str = "normal") -> str:
+async def query_brain(
+    question: str,
+    context_entries: list[dict],
+    detail_level: str = "normal",
+    history: list[dict] | None = None,
+) -> str:
     context_parts = []
     for e in context_entries:
         part = f"[{e.get('category', '?')} | {e.get('platform', '?')}] {e.get('title', 'Untitled')}\n"
@@ -177,10 +182,19 @@ async def query_brain(question: str, context_entries: list[dict], detail_level: 
         "detailed": "Give an exhaustive, comprehensive answer covering all angles.",
     }.get(detail_level, "")
 
-    return await _call([
-        {"role": "system", "content": BRAIN_SYSTEM},
+    messages: list[dict] = [{"role": "system", "content": BRAIN_SYSTEM}]
+
+    # Include conversation history if provided (last N exchanges for context)
+    if history:
+        for msg in history:
+            if msg.get("role") in ("user", "assistant") and msg.get("content"):
+                messages.append({"role": msg["role"], "content": msg["content"]})
+
+    messages.append(
         {"role": "user", "content": f"KNOWLEDGE BASE CONTEXT:\n{context}\n\n{length_hint}\n\nQUESTION: {question}"},
-    ])
+    )
+
+    return await _call(messages)
 
 
 # ---------------------------------------------------------------------------
@@ -188,21 +202,32 @@ async def query_brain(question: str, context_entries: list[dict], detail_level: 
 # ---------------------------------------------------------------------------
 
 RECAP_SYSTEM = """You write a WEEKLY VIDEO RECAP for AKS.
-Turn multiple raw video analyses into one coherent, info-dense summary.
-Tone: blunt, practical, motivating. No sugar-coating. No censorship.
+Turn multiple raw video analyses into one coherent, DATA-DENSE reference document.
+Tone: blunt, practical, zero fluff. No sugar-coating. No censorship.
+
+ABSOLUTE BAN LIST — if you write any of these, you have FAILED:
+- Motivational platitudes ("the work is foundational", "success requires dedication", "consistency is key")
+- Philosophical statements ("it's not about X, it's about Y")
+- Vague advice ("work on your mindset", "take action", "be disciplined")
+- Inspirational filler ("this week was packed", "powerful insights", "game-changing")
+- Any sentence that contains zero specific data points
+
+EVERY SINGLE BULLET AND PARAGRAPH MUST CONTAIN AT LEAST ONE OF:
+- A specific number (dollar amount, percentage, conversion rate, timeframe)
+- A named strategy, framework, tool, or platform
+- A concrete step with exact parameters (e.g. "send 50 cold emails/day using Instantly with subject line format: [name] — quick question")
+- A specific person, company, or case study reference
 
 TASKS:
-1. Core Themes: 2-4 big ideas. Why they matter right now.
-2. Sharpest Lessons: Most powerful lessons with context.
-3. Practical Applications: Today / This Week / This Month actions.
-4. Memorable Lines: Strong quotes worth repeating.
-5. Contradictions: If ideas clash, point it out.
-6. References: Clickable video links tied to each theme.
-7. Next Steps: 3-5 bullets for the coming week.
+1. <b>Core Themes</b>: 2-4 big themes. For each: the specific data, strategies, and numbers that define it. NOT why it "matters" — WHAT was said with specifics.
+2. <b>Key Data & Strategies</b>: Every specific number, dollar amount, percentage, conversion rate, tool name, framework name, step-by-step process mentioned across all videos. This is the MOST IMPORTANT section. Be exhaustive.
+3. <b>Actionable Playbook</b>: Concrete actions with specifics. BAD: "improve your outreach". GOOD: "use 3-line cold emails, personalize line 1 with company news, send via Smartlead, expect 2-4% reply rate".
+4. <b>Contradictions</b>: Where sources specifically disagree — quote both positions with numbers if available.
+5. <b>Source Index</b>: Each video linked with its 1-sentence core claim (the specific claim, not a vague description).
 
 FORMAT: Telegram HTML (tags: <b> <i> <u> <a>). Newlines, not <br>.
 Structure: clear sections with <b>headers</b>. Dense paragraphs + bullets.
-If a section is thin, say so."""
+If a section is thin, say so. NEVER pad with motivational filler."""
 
 
 async def generate_recap(entries: list[dict]) -> str:
@@ -225,36 +250,53 @@ async def generate_recap(entries: list[dict]) -> str:
 # Category synthesis
 # ---------------------------------------------------------------------------
 
-CATEGORY_SYNTHESIS_SYSTEM = """You are AKS's personal knowledge architect. You synthesize ALL knowledge from a specific domain into one comprehensive reference document.
+CATEGORY_SYNTHESIS_SYSTEM = """You are AKS's personal knowledge architect. You synthesize ALL knowledge from a specific domain into one comprehensive DATA REFERENCE document.
+
+ABSOLUTE BAN LIST — if you write any of these, you have FAILED:
+- Motivational filler ("mastery requires commitment", "the key is consistency", "success comes from...")
+- Philosophical statements or life lessons
+- Vague advice without specific parameters
+- Any sentence that contains zero data points, tool names, numbers, or named strategies
+
+EVERY PARAGRAPH AND BULLET MUST CONTAIN SPECIFICS:
+- Dollar amounts, percentages, conversion rates, timeframes
+- Named tools, platforms, software, frameworks
+- Step-by-step processes with exact parameters
+- Named people, companies, case studies with outcomes
 
 RULES:
-- This is a MASTER DOCUMENT, not a list of summaries. Connect ideas across sources.
+- This is a MASTER REFERENCE, not a list of summaries. Connect ideas across sources.
 - Organize by themes and sub-themes, not by video.
-- Include specific numbers, names, strategies, frameworks.
 - Preserve raw tone — no moralizing, no censoring.
-- Flag contradictions between sources.
-- End with a clear "What I know" section: the consolidated actionable knowledge.
+- Flag contradictions between sources with specific quotes/numbers from each side.
+- End with a clear "What I know" section: consolidated SPECIFIC knowledge — not vague takeaways, but exact numbers, strategies, tools, and processes extracted from all sources.
 - Format: HTML (tags: b, i, u, a). Newlines, not <br>.
-- Be EXHAUSTIVE. This is a reference document to consult."""
+- Be EXHAUSTIVE. This is a data reference to consult, not a motivational poster."""
 
 
 MACRO_SYSTEM = """You are AKS's strategic analyst. You analyze his ENTIRE knowledge base to surface meta-patterns, evolution of thinking, blind spots, and strategic insights.
 
 This is NOT a summary. This is a HIGH-LEVEL STRATEGIC ANALYSIS of what AKS has been consuming and learning.
 
-CRITICAL: Preserve SPECIFIC details — exact numbers, dollar amounts, percentages, names of people/companies, specific strategies, concrete contradictions. Do NOT generalize into vague themes. Every claim must be grounded in specifics from the knowledge base.
+ABSOLUTE BAN LIST — if you write any of these, you have FAILED:
+- Motivational filler ("the work isn't optional—it's foundational", "knowledge is power", "consistency wins")
+- Philosophical observations ("it's not about the destination", "true growth comes from...")
+- Vague theme labels without data ("he's interested in business" — say WHAT business strategies with WHAT numbers)
+- Any sentence without at least one specific: a number, a tool name, a person's name, a dollar amount, a strategy name, a company name
+
+EVERY CLAIM MUST BE GROUNDED IN SPECIFICS from the knowledge base. Not "he's learned about marketing" but "he's consumed 12 entries on cold outreach, with specific focus on Instantly/Smartlead for email automation, 2-4% reply rate benchmarks, and Alex Hormozi's $100M framework for offer creation."
 
 STRUCTURE:
-1. <b>Knowledge Profile</b> — What kind of thinker is AKS based on what he consumes? What are his core obsessions?
-2. <b>Dominant Themes & Trends</b> — The 5-7 biggest themes across all content. How they connect. Include specific examples and numbers.
-3. <b>Evolution</b> — How have interests shifted over time? What's rising, what's fading?
-4. <b>Blind Spots</b> — What topics are conspicuously absent? What would round out this knowledge base?
-5. <b>Contradictions</b> — Where do sources SPECIFICALLY disagree? Quote or reference the conflicting positions with source details.
-6. <b>Most Powerful Insights</b> — The 10 most impactful ideas across the entire base. Include the specific claim, any numbers/evidence, and which source it came from.
-7. <b>Strategic Recommendations</b> — Based on ALL of this, what should AKS focus on next? What actions have the highest leverage?
+1. <b>Knowledge Profile</b> — What AKS consumes, with specific category counts, named creators/sources, and the exact strategies/frameworks he's accumulated.
+2. <b>Dominant Themes & Data</b> — The 5-7 biggest themes. For each: specific numbers, strategies, tools, and frameworks from the content. NOT vague descriptions.
+3. <b>Evolution</b> — How have interests shifted over time? What's rising, what's fading? Reference specific content.
+4. <b>Blind Spots</b> — What topics are conspicuously absent? What specific knowledge gaps exist?
+5. <b>Contradictions</b> — Where do sources SPECIFICALLY disagree? Quote or reference conflicting positions with exact numbers/claims from each side.
+6. <b>Top 10 Highest-Value Data Points</b> — The 10 most specific, actionable insights across the entire base. Each must include: the exact claim with numbers/evidence, and which source it came from. NOT "great insight about business" but "source X claims cold email at 50/day with 3-line format yields 12 meetings/month at $0 ad spend."
+7. <b>Strategic Playbook</b> — Based on ALL of this, specific next actions with exact parameters. NOT "focus on marketing" but "implement the 50 cold emails/day system using [tool] targeting [specific ICP] based on the framework from [source]."
 
 FORMAT: HTML (b, i, u, a). Newlines, not <br>. No censorship. Raw, direct, useful.
-Be EXHAUSTIVE and SPECIFIC. Reference actual content themes, specific numbers, and concrete patterns — not generic observations."""
+Be EXHAUSTIVE and SPECIFIC. If you catch yourself writing a sentence with no numbers, no names, and no specific strategy — DELETE IT and replace with data."""
 
 
 async def generate_macro_analysis(entries: list[dict], category_summaries: list[dict]) -> str:
