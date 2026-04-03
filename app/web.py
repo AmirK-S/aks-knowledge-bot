@@ -108,7 +108,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 /* Detail */
 .detail-title{font-size:1.3rem;font-weight:700;margin-bottom:8px}
 .detail-meta{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
-.player{margin-bottom:20px;border-radius:12px;overflow:hidden;background:#000}
+.player{margin-bottom:20px;border-radius:12px;overflow:hidden;background:#000;max-width:480px}
 .player iframe{width:100%;aspect-ratio:16/9;border:none;display:block}
 .section{background:var(--s1);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:14px}
 .section-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
@@ -319,7 +319,7 @@ async function synthesizeCat(){
 // Detail page
 function getPlayer(url,platform){
   if(platform==='youtube'){const m=url.match(/(?:v=|youtu\.be\/)([A-Za-z0-9_-]{11})/);if(m)return`<div class="player"><iframe src="https://www.youtube.com/embed/${m[1]}" allowfullscreen></iframe></div>`}
-  if(platform==='instagram'){const m=url.match(/\/reel\/([^\/\?]+)/)||url.match(/\/p\/([^\/\?]+)/);if(m)return`<div class="player"><iframe src="https://www.instagram.com/reel/${m[1]}/embed/" style="aspect-ratio:9/16;max-height:500px" allowfullscreen></iframe></div>`}
+  if(platform==='instagram'){const m=url.match(/\/reel\/([^\/\?]+)/)||url.match(/\/p\/([^\/\?]+)/);if(m)return`<div class="player" style="max-width:320px"><iframe src="https://www.instagram.com/reel/${m[1]}/embed/" style="aspect-ratio:9/16;max-height:400px" allowfullscreen></iframe></div>`}
   return`<div style="margin-bottom:16px"><a href="${url}" target="_blank" class="btn btn-outline">Open original</a></div>`;
 }
 function parseKP(raw){try{const a=JSON.parse(raw);if(Array.isArray(a))return a}catch(e){}if(typeof raw==='string'&&raw.trim())return[raw];return[]}
@@ -354,12 +354,12 @@ async function loadDetail(id){
     ${kp.length?`<div class="section"><div class="section-title">Key Points</div><ul class="key-points">${kp.map(p=>'<li>'+p+'</li>').join('')}</ul></div>`:''}
     <div class="section">
       <div class="section-header"><div class="section-title">Analysis</div><div class="badges">
+        <button class="btn btn-sm btn-outline" id="translate-btn-${e.id}" onclick="translateSection(${e.id},'analysis',this)">FR</button>
         <button class="btn btn-sm btn-outline" onclick="copyText(document.getElementById('a-raw').textContent,this)">Copy</button>
         <button class="btn btn-sm btn-outline" onclick="downloadText(document.getElementById('a-raw').textContent,'analysis.txt')">Download</button>
       </div></div>
       <div class="section-body">${analysis||'<span style="color:var(--muted)">No analysis</span>'}</div>
       <pre id="a-raw" style="display:none">${(e.analysis||'').replace(/</g,'&lt;')}</pre>
-      <div style="margin-top:10px"><button class="btn btn-sm btn-outline" id="translate-btn-${e.id}" onclick="translateSection(${e.id},'analysis',this)">Traduire en FR</button></div>
       <div id="translate-result-${e.id}"></div>
     </div>
     ${e.raw_transcript?`<div class="section">
@@ -390,8 +390,9 @@ async function rewrite(id,style){
   const styleLabels={short:'Short version',pragmatic:'Pragmatic version',bullets:'Bullet points',detailed:'Full detailed version'};
   const wrapper=document.createElement('div');
   wrapper.style.cssText='margin-top:12px;padding-top:12px;border-top:1px solid var(--border)';
+  const content = md2html(r.text||r.error||'Error');
   wrapper.innerHTML=`<div style="font-weight:600;font-size:.85rem;color:var(--accent);margin-bottom:6px">${styleLabels[style]||style}</div>
-    <div class="section-body">${r.text||r.error||'Error'}</div>
+    <div class="section-body">${content}</div>
     <button class="btn btn-sm btn-outline" style="margin-top:8px" onclick="copyText(this.previousElementSibling.textContent,this)">Copy</button>`;
   el.appendChild(wrapper);
 }
@@ -522,7 +523,7 @@ async function translateSection(id,section,btn){
   try{
     const r=await api('/translate?id='+id+'&section='+section);
     const el=document.getElementById('translate-result-'+id);
-    el.innerHTML='<div class="translate-section"><div class="section-title">Version Fran\u00e7aise</div><div class="section-body">'+( r.text||r.error||'Error')+'</div></div>';
+    el.innerHTML='<div class="translate-section"><div class="section-title">Version Fran\u00e7aise</div><div class="section-body">'+md2html(r.text||r.error||'Error')+'</div></div>';
     btn.textContent='Version FR';btn.classList.add('active');
   }catch(e){btn.textContent='Traduire en FR';btn.disabled=false;console.error(e)}
 }
