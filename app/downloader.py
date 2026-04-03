@@ -183,40 +183,42 @@ async def instagram_get_audio(url: str) -> dict:
     if not video_url:
         return {"title": title, "transcript": None, "audio_path": None, "duration": None, "video_url": None}
 
-    # Save video file permanently for inline playback
-    import hashlib
-    videos_dir = "/data/videos"
-    os.makedirs(videos_dir, exist_ok=True)
-    video_hash = hashlib.md5(canonical.encode()).hexdigest()[:12]
-    saved_video = os.path.join(videos_dir, f"{video_hash}.mp4")
-    local_video_url = None
-
-    # Download video file
-    try:
-        async with httpx.AsyncClient(timeout=120) as dl_client:
-            resp = await dl_client.get(video_url)
-            if resp.status_code == 200:
-                with open(saved_video, "wb") as f:
-                    f.write(resp.content)
-                local_video_url = f"/video/{video_hash}.mp4"
-                log.info("Saved video: %s", local_video_url)
-    except Exception:
-        log.warning("Failed to save video for %s", canonical)
-
-    # Extract audio from saved video or download separately
+    # Download and extract audio with yt-dlp
     audio_path = tempfile.mktemp(suffix=".m4a")
-    source = saved_video if os.path.exists(saved_video) else video_url
-
+    cmd = [
+        "yt-dlp",
+        "-f", "ba/b",
+        "-o", audio_path,
+        "--no-warnings",
+        video_url,
+    ]
     proc = await asyncio.create_subprocess_exec(
-        "ffmpeg", "-i", source, "-vn", "-c:a", "aac", "-b:a", "128k", audio_path, "-y",
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
     await proc.communicate()
 
     if os.path.exists(audio_path):
-        return {"title": title, "transcript": None, "audio_path": audio_path, "duration": None, "video_url": local_video_url}
+        return {"title": title, "transcript": None, "audio_path": audio_path, "duration": None}
 
-    return {"title": title, "transcript": None, "audio_path": None, "duration": None, "video_url": local_video_url}
+    # Fallback: download raw video and extract with ffmpeg
+    video_path = tempfile.mktemp(suffix=".mp4")
+    async with httpx.AsyncClient(timeout=120) as client:
+        resp = await client.get(video_url)
+        with open(video_path, "wb") as f:
+            f.write(resp.content)
+
+    audio_path2 = tempfile.mktemp(suffix=".m4a")
+    proc2 = await asyncio.create_subprocess_exec(
+        "ffmpeg", "-i", video_path, "-vn", "-c:a", "aac", "-b:a", "128k", audio_path2, "-y",
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    await proc2.communicate()
+    os.unlink(video_path)
+
+    if os.path.exists(audio_path2):
+        return {"title": title, "transcript": None, "audio_path": audio_path2, "duration": None}
+
+    return {"title": title, "transcript": None, "audio_path": None, "duration": None}
 
 
 # ---------------------------------------------------------------------------
