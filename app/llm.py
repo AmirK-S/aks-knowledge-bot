@@ -18,6 +18,43 @@ HEADERS = {
 }
 
 
+async def _call_stream(messages: list[dict], max_tokens: int = 8192):
+    """Async generator that yields text chunks via SSE streaming."""
+    async with httpx.AsyncClient(timeout=300) as client:
+        async with client.stream(
+            "POST",
+            OPENROUTER_URL,
+            headers=HEADERS,
+            json={
+                "model": MODEL,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": 0.3,
+                "stream": True,
+            },
+        ) as resp:
+            resp.raise_for_status()
+            buf = ""
+            async for raw_chunk in resp.aiter_text():
+                buf += raw_chunk
+                while "\n" in buf:
+                    line, buf = buf.split("\n", 1)
+                    line = line.strip()
+                    if not line or not line.startswith("data: "):
+                        continue
+                    payload = line[6:]
+                    if payload == "[DONE]":
+                        return
+                    try:
+                        data = json.loads(payload)
+                        delta = data.get("choices", [{}])[0].get("delta", {})
+                        content = delta.get("content")
+                        if content:
+                            yield content
+                    except json.JSONDecodeError:
+                        continue
+
+
 async def _call(messages: list[dict], max_tokens: int = 8192) -> str:
     async with httpx.AsyncClient(timeout=300) as client:
         resp = await client.post(
@@ -195,6 +232,46 @@ async def query_brain(
     )
 
     return await _call(messages)
+
+
+async def query_brain_stream(
+    question: str,
+    context_entries: list[dict],
+    detail_level: str = "normal",
+    history: list[dict] | None = None,
+):
+    """Async generator version of query_brain — yields text chunks."""
+    context_parts = []
+    for e in context_entries:
+        part = f"[{e.get('category', '?')} | {e.get('platform', '?')}] {e.get('title', 'Untitled')}\n"
+        part += f"URL: {e.get('url', '')}\n"
+        if e.get("key_points"):
+            part += f"Key points: {e['key_points']}\n"
+        if e.get("analysis"):
+            part += f"Analysis: {e['analysis'][:2000]}\n"
+        context_parts.append(part)
+
+    context = "\n---\n".join(context_parts)
+
+    length_hint = {
+        "short": "Answer in 2-3 sentences max.",
+        "normal": "Give a thorough answer.",
+        "detailed": "Give an exhaustive, comprehensive answer covering all angles.",
+    }.get(detail_level, "")
+
+    messages: list[dict] = [{"role": "system", "content": BRAIN_SYSTEM}]
+
+    if history:
+        for msg in history:
+            if msg.get("role") in ("user", "assistant") and msg.get("content"):
+                messages.append({"role": msg["role"], "content": msg["content"]})
+
+    messages.append(
+        {"role": "user", "content": f"KNOWLEDGE BASE CONTEXT:\n{context}\n\n{length_hint}\n\nQUESTION: {question}"},
+    )
+
+    async for chunk in _call_stream(messages):
+        yield chunk
 
 
 # ---------------------------------------------------------------------------

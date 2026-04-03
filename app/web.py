@@ -16,7 +16,7 @@ from app.database import (
     get_all_weeks, get_entries_by_week, save_recap, get_all_recaps,
     save_macro_analysis, get_latest_macro,
 )
-from app.llm import query_brain, generate_recap, synthesize_category, generate_macro_analysis
+from app.llm import query_brain, query_brain_stream, generate_recap, synthesize_category, generate_macro_analysis
 
 log = logging.getLogger(__name__)
 
@@ -134,16 +134,15 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .recap-body{max-height:0;overflow:hidden;transition:max-height .35s ease}
 .recap-card.open .recap-body{max-height:5000px}
 .recap-body-inner{padding:0 20px 20px}
-/* Lang toggle */
-.lang-toggle{display:inline-block;padding:6px 14px;border-radius:8px;font-size:.75rem;font-weight:600;cursor:pointer;border:1px solid var(--border);color:var(--muted);background:transparent;transition:border-color .15s,color .15s;margin-bottom:16px}
-.lang-toggle:hover{border-color:var(--accent);color:var(--accent)}
+/* Translate button */
+.translate-section{margin-top:12px;padding-top:12px;border-top:1px dashed var(--border)}
+.translate-section .section-title{color:var(--accent2)}
 @media(max-width:768px){.sidebar{display:none}.main{margin-left:0}}
 </style></head>
 <body>
 <div class="app">
 <nav class="sidebar">
   <h1>AKS Brain</h1><p class="sub">Knowledge Base</p>
-  <button class="lang-toggle" id="lang-btn" onclick="toggleLang()">FR / EN</button>
   <a class="nav-item active" onclick="showPage('home')" data-page="home">Home</a>
   <a class="nav-item" onclick="showPage('chat')" data-page="chat">Ask Brain</a>
   <a class="nav-item" onclick="showPage('recap')" data-page="recap">Weekly Recap</a>
@@ -214,22 +213,8 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 </div></div>
 
 <script>
-// Language toggle
-let currentLang=localStorage.getItem('brain_lang')||'en';
-function getLangParam(){return currentLang==='fr'?'lang=fr':'lang=en'}
-function toggleLang(){
-  currentLang=currentLang==='en'?'fr':'en';
-  localStorage.setItem('brain_lang',currentLang);
-  updateLangBtn();
-}
-function updateLangBtn(){
-  const btn=document.getElementById('lang-btn');
-  if(btn)btn.textContent=currentLang==='fr'?'Langue: FR':'Language: EN';
-}
-
 async function api(path,opts){
-  const sep=path.includes('?')?'&':'?';
-  const r=await fetch('/api'+path+sep+getLangParam(),opts);
+  const r=await fetch('/api'+path,opts);
   return r.json();
 }
 let currentCat='',allCatEntries=[];
@@ -324,7 +309,9 @@ async function synthesizeCat(){
   const r=await api('/synthesize/'+encodeURIComponent(currentCat));
   el.innerHTML=`<div class="section"><div class="section-header"><div class="section-title">Complete synthesis: ${currentCat}</div>
     <div><button class="btn btn-sm btn-outline" onclick="copyText(this.closest('.section').querySelector('.synthesis-body').textContent,this)">Copy</button></div></div>
-    <div class="synthesis-body">${r.text||r.error||'Error'}</div></div>`;
+    <div class="synthesis-body">${r.text||r.error||'Error'}</div>
+    <div style="margin-top:10px"><button class="btn btn-sm btn-outline" onclick="translateSynthesis(this)">Traduire en FR</button></div>
+    <div class="synthesis-translate-result"></div></div>`;
 }
 
 // Detail page
@@ -370,6 +357,8 @@ async function loadDetail(id){
       </div></div>
       <div class="section-body">${analysis||'<span style="color:var(--muted)">No analysis</span>'}</div>
       <pre id="a-raw" style="display:none">${(e.analysis||'').replace(/</g,'&lt;')}</pre>
+      <div style="margin-top:10px"><button class="btn btn-sm btn-outline" id="translate-btn-${e.id}" onclick="translateSection(${e.id},'analysis',this)">Traduire en FR</button></div>
+      <div id="translate-result-${e.id}"></div>
     </div>
     ${e.raw_transcript?`<div class="section">
       <div class="section-header"><div class="section-title">Transcript</div><div class="badges">
@@ -405,19 +394,45 @@ async function rewrite(id,style){
   el.appendChild(wrapper);
 }
 
-// Chat
+// Chat (streaming)
 let chatHistory=[];
 async function sendChat(){
   const input=document.getElementById('chatInput');const q=input.value.trim();if(!q)return;input.value='';
   const msgs=document.getElementById('chat-messages');
-  msgs.innerHTML+=`<div class="chat-msg user">${q}</div><div class="chat-msg bot" id="chat-loading">Thinking...</div>`;
+  msgs.innerHTML+=`<div class="chat-msg user">${q.replace(/</g,'&lt;')}</div><div class="chat-msg bot" id="chat-loading"><span style="color:var(--muted)">...</span></div>`;
   msgs.scrollTop=msgs.scrollHeight;
   chatHistory.push({role:'user',content:q});
   const lastFive=chatHistory.slice(-10);
-  const r=await api('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,history:lastFive})});
-  const answer=r.answer||r.error||'Error';
-  chatHistory.push({role:'assistant',content:answer});
-  document.getElementById('chat-loading').outerHTML=`<div class="chat-msg bot">${answer}</div>`;
+  try{
+    const resp=await fetch('/api/chat-stream?'+getLangParam(),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,history:lastFive})});
+    const botDiv=document.getElementById('chat-loading');
+    if(!resp.ok){botDiv.innerHTML='Error: '+resp.status;return}
+    const ct=resp.headers.get('content-type')||'';
+    if(ct.includes('text/event-stream')){
+      const reader=resp.body.getReader();const dec=new TextDecoder();let full='';let buf='';
+      while(true){
+        const{done,value}=await reader.read();if(done)break;
+        buf+=dec.decode(value,{stream:true});
+        const lines=buf.split('\n');buf=lines.pop()||'';
+        for(const line of lines){
+          const l=line.trim();if(!l||!l.startsWith('data: '))continue;
+          const payload=l.slice(6);if(payload==='[DONE]')continue;
+          try{const evt=JSON.parse(payload);
+            if(evt.type==='chunk'){full+=evt.text;botDiv.innerHTML=full}
+            else if(evt.type==='sources'){full+=evt.html;botDiv.innerHTML=full}
+            else if(evt.type==='error'){botDiv.innerHTML=full+(evt.text||'Error')}
+          }catch(e){}
+        }
+        msgs.scrollTop=msgs.scrollHeight;
+      }
+      chatHistory.push({role:'assistant',content:full});
+      botDiv.removeAttribute('id');
+    }else{
+      const r=await resp.json();const answer=r.answer||r.error||'Error';
+      chatHistory.push({role:'assistant',content:answer});
+      botDiv.outerHTML=`<div class="chat-msg bot">${answer}</div>`;
+    }
+  }catch(e){console.error('chat error',e);const b=document.getElementById('chat-loading');if(b)b.innerHTML='Connection error. Try again.'}
   msgs.scrollTop=msgs.scrollHeight;
 }
 
@@ -441,6 +456,8 @@ async function loadRecaps(){
       </div>
       <div class="recap-body"><div class="recap-body-inner">
         <div class="synthesis-body">${r.recap||'Empty'}</div>
+        <div style="margin-top:10px"><button class="btn btn-sm btn-outline" onclick="translateRecap('${r.week_start}',this)">Traduire en FR</button></div>
+        <div class="recap-translate-result"></div>
       </div></div>
     </div>`).join('');
 }
@@ -474,7 +491,38 @@ async function loadMacro(){
   }catch(e){console.error('loadMacro error',e)}
 }
 
-updateLangBtn();
+async function translateSection(id,section,btn){
+  btn.disabled=true;btn.textContent='Translating...';
+  try{
+    const r=await api('/translate?id='+id+'&section='+section);
+    const el=document.getElementById('translate-result-'+id);
+    el.innerHTML='<div class="translate-section"><div class="section-title">Version Fran\u00e7aise</div><div class="section-body">'+( r.text||r.error||'Error')+'</div></div>';
+    btn.textContent='Version FR';btn.classList.add('active');
+  }catch(e){btn.textContent='Traduire en FR';btn.disabled=false;console.error(e)}
+}
+async function translateSynthesis(btn){
+  btn.disabled=true;btn.textContent='Translating...';
+  try{
+    const section=btn.closest('.section');
+    const original=section.querySelector('.synthesis-body').innerHTML;
+    const r=await api('/translate-text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:original})});
+    const target=section.querySelector('.synthesis-translate-result');
+    target.innerHTML='<div class="translate-section"><div class="section-title">Version Fran\u00e7aise</div><div class="synthesis-body">'+( r.text||r.error||'Error')+'</div></div>';
+    btn.textContent='Version FR';btn.classList.add('active');
+  }catch(e){btn.textContent='Traduire en FR';btn.disabled=false;console.error(e)}
+}
+async function translateRecap(weekStart,btn){
+  btn.disabled=true;btn.textContent='Translating...';
+  try{
+    const card=btn.closest('.recap-body-inner');
+    const original=card.querySelector('.synthesis-body').innerHTML;
+    const r=await api('/translate-text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:original})});
+    const target=card.querySelector('.recap-translate-result');
+    target.innerHTML='<div class="translate-section"><div class="section-title">Version Fran\u00e7aise</div><div class="synthesis-body">'+( r.text||r.error||'Error')+'</div></div>';
+    btn.textContent='Version FR';btn.classList.add('active');
+  }catch(e){btn.textContent='Traduire en FR';btn.disabled=false;console.error(e)}
+}
+
 loadStats();loadCategories();loadRecent();loadRecaps();loadMacro();
 </script></body></html>"""
 
@@ -678,6 +726,91 @@ async def handle_request(reader, writer):
             else:
                 text = await generate_recap(entries)
                 writer.write(_json_resp({"text": text}))
+        elif path == "/api/translate":
+            qs = parse_qs(urlparse(full_path).query)
+            eid = int(qs.get("id", [0])[0])
+            entry = await _get_entry(eid)
+            if not entry:
+                writer.write(_json_resp({"error": "Not found"}))
+            else:
+                from app.llm import _call
+                content = entry.get("analysis", "")
+                text = await _call([
+                    {"role": "system", "content": "Translate this to French. Keep ALL specific data, numbers, names intact. Keep HTML formatting. Do not summarize or modify content - translate faithfully."},
+                    {"role": "user", "content": content},
+                ])
+                writer.write(_json_resp({"text": text}))
+        elif path == "/api/translate-text" and method == "POST":
+            body = json.loads(_get_body(raw))
+            content = body.get("text", "")
+            from app.llm import _call
+            text = await _call([
+                {"role": "system", "content": "Translate this to French. Keep ALL specific data, numbers, names intact. Keep HTML formatting. Do not summarize or modify content - translate faithfully."},
+                {"role": "user", "content": content},
+            ])
+            writer.write(_json_resp({"text": text}))
+        elif path == "/api/chat-stream" and method == "POST":
+            body = json.loads(_get_body(raw))
+            question = body.get("question", "")
+            history = body.get("history", [])
+
+            sse_headers = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n"
+            writer.write(sse_headers.encode())
+            await writer.drain()
+
+            def _sse_event(data: dict) -> bytes:
+                return f"data: {json.dumps(data, ensure_ascii=False)}\n\n".encode()
+
+            # Handle simple greetings without search
+            _greetings = {"hi", "hello", "hey", "salut", "yo", "bonjour", "coucou", "sup", "wesh", "slt"}
+            words = question.lower().split()
+            is_greeting = len(words) < 5 and any(w.strip("!?,. ") in _greetings for w in words)
+
+            try:
+                if is_greeting:
+                    from app.llm import _call_stream
+                    async for chunk in _call_stream([
+                        {"role": "system", "content": "You are AKS's knowledge brain assistant. Respond to greetings briefly and naturally. Match the user's language (French/English). Keep it short. Mention you can help search the knowledge base."},
+                        {"role": "user", "content": question},
+                    ], max_tokens=256):
+                        writer.write(_sse_event({"type": "chunk", "text": chunk}))
+                else:
+                    entries = await search_entries(question, limit=5)
+                    if not entries:
+                        entries = await get_recent_entries(days=60, limit=5)
+                    # Cap entries to 5 max to avoid timeout on broad questions
+                    entries = entries[:5]
+
+                    # Build source citations
+                    sources = []
+                    for e in entries[:5]:
+                        title = e.get("title") or e.get("url", "")
+                        url = e.get("url", "")
+                        if title and url:
+                            sources.append(f'<a href="{url}">{title}</a>')
+
+                    chunk_count = 0
+                    async for chunk in query_brain_stream(question, entries, history=history[-10:] if history else None):
+                        writer.write(_sse_event({"type": "chunk", "text": chunk}))
+                        chunk_count += 1
+                        if chunk_count % 5 == 0:
+                            await writer.drain()
+
+                    # Send sources at the end
+                    if sources:
+                        src_html = "\n\n<b>Sources:</b>\n" + "\n".join(f"- {s}" for s in sources)
+                        writer.write(_sse_event({"type": "sources", "html": src_html}))
+
+            except asyncio.TimeoutError:
+                writer.write(_sse_event({"type": "error", "text": "Request timed out. Try a simpler question."}))
+            except Exception as exc:
+                log.exception("chat-stream error")
+                writer.write(_sse_event({"type": "error", "text": f"Error: {exc}"}))
+
+            writer.write(b"data: [DONE]\n\n")
+            await writer.drain()
+            writer.close()
+            return
         elif path == "/api/chat" and method == "POST":
             body = json.loads(_get_body(raw))
             question = body.get("question", "")
