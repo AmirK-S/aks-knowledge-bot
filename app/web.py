@@ -119,7 +119,8 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 /* Chat */
 .chat-messages{max-height:400px;overflow-y:auto;margin-bottom:12px;display:flex;flex-direction:column;gap:8px}
 .chat-msg{padding:10px 14px;border-radius:10px;font-size:.85rem;max-width:85%;line-height:1.5}
-.chat-msg.user{background:var(--accent);color:#fff;align-self:flex-end}.chat-msg.bot{background:var(--s2);align-self:flex-start}
+.chat-msg.user{background:var(--accent);color:#fff;align-self:flex-end}.chat-msg.bot{background:var(--s2);align-self:flex-start;line-height:1.6}
+.chat-msg.bot b{color:var(--accent)}.chat-msg.bot br+b{display:inline-block;margin-top:6px}
 .chat-input{display:flex;gap:8px}
 .chat-input input{flex:1;background:var(--s2);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-size:.85rem;outline:none}
 .synthesis-body{font-size:.85rem;line-height:1.7;color:#ccc;white-space:pre-wrap;word-break:break-word}
@@ -394,6 +395,21 @@ async function rewrite(id,style){
   el.appendChild(wrapper);
 }
 
+// Markdown to HTML converter for chat
+function md2html(t){
+  // headers: ## text → <b>text</b> with spacing
+  t=t.replace(/^## (.+)$/gm,'<br><b>$1</b>');
+  // bold: **text**
+  t=t.replace(/\*\*(.+?)\*\*/g,'<b>$1</b>');
+  // italic: *text* (but not inside bold which is already converted)
+  t=t.replace(/(?<![*])\*([^*]+?)\*(?![*])/g,'<i>$1</i>');
+  // bullets: - item at start of line
+  t=t.replace(/^- (.+)$/gm,'\u2022 $1');
+  // newlines to <br>
+  t=t.replace(/\n/g,'<br>');
+  return t;
+}
+
 // Chat (streaming)
 let chatHistory=[];
 async function sendChat(){
@@ -418,19 +434,20 @@ async function sendChat(){
           const l=line.trim();if(!l||!l.startsWith('data: '))continue;
           const payload=l.slice(6);if(payload==='[DONE]')continue;
           try{const evt=JSON.parse(payload);
-            if(evt.type==='chunk'){full+=evt.text;botDiv.innerHTML=full}
-            else if(evt.type==='sources'){full+=evt.html;botDiv.innerHTML=full}
-            else if(evt.type==='error'){botDiv.innerHTML=full+(evt.text||'Error')}
+            if(evt.type==='chunk'){full+=evt.text;botDiv.innerHTML=md2html(full)}
+            else if(evt.type==='sources'){full+=evt.html;botDiv.innerHTML=md2html(full)}
+            else if(evt.type==='error'){botDiv.innerHTML=md2html(full+(evt.text||'Error'))}
           }catch(e){}
         }
         msgs.scrollTop=msgs.scrollHeight;
       }
+      botDiv.innerHTML=md2html(full);
       chatHistory.push({role:'assistant',content:full});
       botDiv.removeAttribute('id');
     }else{
       const r=await resp.json();const answer=r.answer||r.error||'Error';
       chatHistory.push({role:'assistant',content:answer});
-      botDiv.outerHTML=`<div class="chat-msg bot">${answer}</div>`;
+      botDiv.outerHTML=`<div class="chat-msg bot">${md2html(answer)}</div>`;
     }
   }catch(e){console.error('chat error',e);const b=document.getElementById('chat-loading');if(b)b.innerHTML='Connection error. Try again.'}
   msgs.scrollTop=msgs.scrollHeight;
