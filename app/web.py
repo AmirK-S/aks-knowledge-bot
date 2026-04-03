@@ -320,7 +320,7 @@ async function synthesizeCat(){
 // Detail page
 function getPlayer(url,platform){
   if(platform==='youtube'){const m=url.match(/(?:v=|youtu\.be\/)([A-Za-z0-9_-]{11})/);if(m)return`<div class="player"><iframe src="https://www.youtube.com/embed/${m[1]}" allowfullscreen></iframe></div>`}
-  if(platform==='instagram'){return`<div style="margin-bottom:16px"><a href="${url}" target="_blank" class="btn btn-outline">Watch on Instagram</a></div>`}
+  if(platform==='instagram'){const m=url.match(/\/reel\/([^\/\?]+)/)||url.match(/\/p\/([^\/\?]+)/);if(m)return`<div class="player" style="max-width:340px"><iframe src="https://www.instagram.com/reel/${m[1]}/embed/captioned/" style="aspect-ratio:9/16;max-height:450px" allowfullscreen></iframe></div><div style="margin-bottom:12px"><a href="${url}" target="_blank" style="font-size:.75rem;color:var(--muted)">Open on Instagram</a></div>`}
   return`<div style="margin-bottom:16px"><a href="${url}" target="_blank" class="btn btn-outline">Open original</a></div>`;
 }
 function parseKP(raw){try{const a=JSON.parse(raw);if(Array.isArray(a))return a}catch(e){}if(typeof raw==='string'&&raw.trim())return[raw];return[]}
