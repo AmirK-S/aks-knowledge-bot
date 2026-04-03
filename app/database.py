@@ -116,18 +116,38 @@ async def insert_entry(
     return cur.lastrowid
 
 
+def _sanitize_fts_query(query: str) -> str:
+    """Sanitize a query for FTS5 — remove special chars that break syntax."""
+    import re
+    # Remove FTS5 special characters
+    cleaned = re.sub(r'[?!@#$%^&*()\[\]{}<>;:\'",./\\|`~+=]', ' ', query)
+    # Collapse whitespace
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    # If empty after cleaning, return a dummy
+    return cleaned if cleaned else "search"
+
+
 async def search_entries(query: str, limit: int = 10) -> list[dict]:
     db = await get_db()
-    rows = await db.execute_fetchall(
-        """SELECT e.*, rank
-           FROM entries_fts fts
-           JOIN entries e ON e.id = fts.rowid
-           WHERE entries_fts MATCH ?
-           ORDER BY rank
-           LIMIT ?""",
-        (query, limit),
-    )
-    return [dict(r) for r in rows]
+    safe_query = _sanitize_fts_query(query)
+    try:
+        rows = await db.execute_fetchall(
+            """SELECT e.*, rank
+               FROM entries_fts fts
+               JOIN entries e ON e.id = fts.rowid
+               WHERE entries_fts MATCH ?
+               ORDER BY rank
+               LIMIT ?""",
+            (safe_query, limit),
+        )
+        return [dict(r) for r in rows]
+    except Exception:
+        # Fallback: LIKE search if FTS fails
+        rows = await db.execute_fetchall(
+            "SELECT * FROM entries WHERE analysis LIKE ? OR title LIKE ? OR key_points LIKE ? ORDER BY created_at DESC LIMIT ?",
+            (f"%{query}%", f"%{query}%", f"%{query}%", limit),
+        )
+        return [dict(r) for r in rows]
 
 
 async def get_entries_by_category(category: str, limit: int = 20) -> list[dict]:
