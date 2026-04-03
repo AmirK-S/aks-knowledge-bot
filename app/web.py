@@ -324,7 +324,7 @@ async function synthesizeCat(){
 // Detail page
 function getPlayer(url,platform){
   if(platform==='youtube'){const m=url.match(/(?:v=|youtu\.be\/)([A-Za-z0-9_-]{11})/);if(m)return`<div class="player"><iframe src="https://www.youtube.com/embed/${m[1]}" allowfullscreen></iframe></div>`}
-  if(platform==='instagram'){return`<div class="player" style="max-width:360px;display:flex;align-items:center;justify-content:center;aspect-ratio:9/16;cursor:pointer" onclick="window.open('${url}','_blank')"><div style="text-align:center"><div style="font-size:3rem;margin-bottom:8px">\u25B6</div><div style="font-size:.8rem;color:var(--muted)">Play on Instagram</div></div></div>`}
+  if(platform==='instagram'){const m=url.match(/\/reel\/([^\/\?]+)/)||url.match(/\/p\/([^\/\?]+)/);if(m)return`<div class="player" style="max-width:360px"><iframe src="https://www.instagram.com/reel/${m[1]}/embed/" style="width:100%;aspect-ratio:9/16;max-height:500px;border:none" allowfullscreen></iframe></div>`}
   return`<div style="margin-bottom:16px"><a href="${url}" target="_blank" class="btn btn-outline">Open original</a></div>`;
 }
 function parseKP(raw){try{const a=JSON.parse(raw);if(Array.isArray(a))return a}catch(e){}if(typeof raw==='string'&&raw.trim())return[raw];return[]}
