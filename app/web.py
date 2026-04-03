@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import secrets
 import time
 from asyncio import start_server
@@ -323,7 +324,7 @@ async function synthesizeCat(){
 // Detail page
 function getPlayer(url,platform){
   if(platform==='youtube'){const m=url.match(/(?:v=|youtu\.be\/)([A-Za-z0-9_-]{11})/);if(m)return`<div class="player"><iframe src="https://www.youtube.com/embed/${m[1]}" allowfullscreen></iframe></div>`}
-  if(platform==='instagram'){const m=url.match(/\/reel\/([^\/\?]+)/)||url.match(/\/p\/([^\/\?]+)/);if(m)return`<div class="player-ig"><div class="player-ig-clip"><iframe src="https://www.instagram.com/reel/${m[1]}/embed/" height="720" allowfullscreen></iframe></div></div>`}
+  if(platform==='instagram'){return`<div class="player" style="max-width:360px;display:flex;align-items:center;justify-content:center;aspect-ratio:9/16;cursor:pointer" onclick="window.open('${url}','_blank')"><div style="text-align:center"><div style="font-size:3rem;margin-bottom:8px">\u25B6</div><div style="font-size:.8rem;color:var(--muted)">Play on Instagram</div></div></div>`}
   return`<div style="margin-bottom:16px"><a href="${url}" target="_blank" class="btn btn-outline">Open original</a></div>`;
 }
 function parseKP(raw){try{const a=JSON.parse(raw);if(Array.isArray(a))return a}catch(e){}if(typeof raw==='string'&&raw.trim())return[raw];return[]}
@@ -355,7 +356,7 @@ async function loadDetail(id){
       </div>
     </div>
     <div style="display:flex;gap:20px;align-items:flex-start">
-      <div style="flex-shrink:0;position:sticky;top:20px">${getPlayer(e.url,e.platform)}</div>
+      <div style="flex-shrink:0;position:sticky;top:20px">${e.video_url?`<div class="player" style="max-width:360px"><video src="${e.video_url}" controls playsinline style="width:100%;border-radius:12px;aspect-ratio:9/16;max-height:500px;object-fit:contain"></video></div>`:getPlayer(e.url,e.platform)}</div>
       <div style="flex:1;min-width:0;overflow-y:auto">
         ${kp.length?`<div class="section"><div class="section-title">Key Points</div><ul class="key-points">${kp.map(p=>'<li>'+p+'</li>').join('')}</ul></div>`:''}
         <div class="section">
@@ -896,6 +897,20 @@ async def handle_request(reader, writer):
                     writer.write(_json_resp({"answer": answer}))
                 except asyncio.TimeoutError:
                     writer.write(_json_resp({"answer": "Sorry, the request timed out. Try a simpler question or try again.", "error": "timeout"}))
+        elif path.startswith("/video/") and path.endswith(".mp4"):
+            # Serve stored video files
+            filename = path.split("/video/")[1]
+            video_path = f"/data/videos/{filename}"
+            if os.path.exists(video_path):
+                size = os.path.getsize(video_path)
+                writer.write(f"HTTP/1.1 200 OK\r\nContent-Type: video/mp4\r\nContent-Length: {size}\r\nAccept-Ranges: bytes\r\n\r\n".encode())
+                with open(video_path, "rb") as vf:
+                    while chunk := vf.read(65536):
+                        writer.write(chunk)
+                        await writer.drain()
+            else:
+                writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\n\r\nNot Found")
+
         else:
             writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\n\r\nNot Found")
         await writer.drain()

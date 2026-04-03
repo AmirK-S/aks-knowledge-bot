@@ -31,6 +31,7 @@ async def ingest_url(
     audio_path = dl.get("audio_path")
     source_type = dl.get("source_type")
     duration = dl.get("duration")
+    video_url = dl.get("video_url")
 
     # Auto-adapt detail level based on duration if not explicitly set
     if detail_level == "normal" and duration:
@@ -86,6 +87,7 @@ async def ingest_url(
         tags=tags,
         language=language,
         source_type=source_type,
+        video_url=video_url,
     )
 
     log.info("Stored entry #%d: %s [%s]", entry_id, canonical_url, category)

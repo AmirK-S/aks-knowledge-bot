@@ -33,6 +33,7 @@ async def _init_tables(db: aiosqlite.Connection):
             tags TEXT DEFAULT '[]',
             language TEXT DEFAULT 'en',
             source_type TEXT,
+            video_url TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -95,11 +96,18 @@ async def insert_entry(
     tags: str = "[]",
     language: str = "en",
     source_type: str | None = None,
+    video_url: str | None = None,
 ) -> int:
     db = await get_db()
+    # Add video_url column if it doesn't exist (migration for existing DBs)
+    try:
+        await db.execute("ALTER TABLE entries ADD COLUMN video_url TEXT")
+        await db.commit()
+    except Exception:
+        pass
     cur = await db.execute(
-        """INSERT INTO entries (url, platform, title, raw_transcript, analysis, key_points, category, tags, language, source_type)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """INSERT INTO entries (url, platform, title, raw_transcript, analysis, key_points, category, tags, language, source_type, video_url)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(url) DO UPDATE SET
              title=excluded.title,
              raw_transcript=excluded.raw_transcript,
@@ -108,9 +116,10 @@ async def insert_entry(
              category=excluded.category,
              tags=excluded.tags,
              language=excluded.language,
-             source_type=excluded.source_type
+             source_type=excluded.source_type,
+             video_url=COALESCE(excluded.video_url, entries.video_url)
         """,
-        (url, platform, title, raw_transcript, analysis, key_points, category, tags, language, source_type),
+        (url, platform, title, raw_transcript, analysis, key_points, category, tags, language, source_type, video_url),
     )
     await db.commit()
     return cur.lastrowid
