@@ -126,6 +126,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .synthesis-body{font-size:.85rem;line-height:1.7;color:#ccc;white-space:pre-wrap;word-break:break-word}
 .synthesis-body b{color:var(--accent)}
 .loading{text-align:center;padding:40px;color:var(--muted)}
+@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
 /* Collapsible recap cards */
 .recap-card{background:var(--s1);border:1px solid var(--border);border-radius:12px;margin-bottom:12px;overflow:hidden}
 .recap-header{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;cursor:pointer;user-select:none;transition:background .15s}
@@ -319,7 +320,7 @@ async function synthesizeCat(){
 // Detail page
 function getPlayer(url,platform){
   if(platform==='youtube'){const m=url.match(/(?:v=|youtu\.be\/)([A-Za-z0-9_-]{11})/);if(m)return`<div class="player"><iframe src="https://www.youtube.com/embed/${m[1]}" allowfullscreen></iframe></div>`}
-  if(platform==='instagram'){const m=url.match(/\/reel\/([^\/\?]+)/)||url.match(/\/p\/([^\/\?]+)/);if(m)return`<div class="player" style="max-width:320px"><iframe src="https://www.instagram.com/reel/${m[1]}/embed/" style="aspect-ratio:9/16;max-height:400px" allowfullscreen></iframe></div>`}
+  if(platform==='instagram'){return`<div style="margin-bottom:16px"><a href="${url}" target="_blank" class="btn btn-outline">Watch on Instagram</a></div>`}
   return`<div style="margin-bottom:16px"><a href="${url}" target="_blank" class="btn btn-outline">Open original</a></div>`;
 }
 function parseKP(raw){try{const a=JSON.parse(raw);if(Array.isArray(a))return a}catch(e){}if(typeof raw==='string'&&raw.trim())return[raw];return[]}
@@ -523,8 +524,9 @@ async function translateSection(id,section,btn){
   try{
     const r=await api('/translate?id='+id+'&section='+section);
     const el=document.getElementById('translate-result-'+id);
-    el.innerHTML='<div class="translate-section"><div class="section-title">Version Fran\u00e7aise</div><div class="section-body">'+md2html(r.text||r.error||'Error')+'</div></div>';
-    btn.textContent='Version FR';btn.classList.add('active');
+    el.innerHTML='<div class="translate-section" style="animation:fadeIn .5s"><div class="section-title" style="color:var(--accent)">Version Fran\u00e7aise</div><div class="section-body">'+md2html(r.text||r.error||'Error')+'</div></div>';
+    btn.textContent='FR \u2713';btn.classList.add('active');btn.style.background='rgba(34,197,94,.15)';btn.style.color='var(--green)';btn.style.borderColor='var(--green)';
+    el.scrollIntoView({behavior:'smooth',block:'start'});
   }catch(e){btn.textContent='Traduire en FR';btn.disabled=false;console.error(e)}
 }
 async function translateSynthesis(btn){
@@ -534,8 +536,9 @@ async function translateSynthesis(btn){
     const original=section.querySelector('.synthesis-body').innerHTML;
     const r=await api('/translate-text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:original})});
     const target=section.querySelector('.synthesis-translate-result');
-    target.innerHTML='<div class="translate-section"><div class="section-title">Version Fran\u00e7aise</div><div class="synthesis-body">'+( r.text||r.error||'Error')+'</div></div>';
-    btn.textContent='Version FR';btn.classList.add('active');
+    target.innerHTML='<div class="translate-section" style="animation:fadeIn .5s"><div class="section-title" style="color:var(--accent)">Version Fran\u00e7aise</div><div class="synthesis-body">'+md2html(r.text||r.error||'Error')+'</div></div>';
+    btn.textContent='FR \u2713';btn.classList.add('active');btn.style.background='rgba(34,197,94,.15)';btn.style.color='var(--green)';btn.style.borderColor='var(--green)';
+    target.scrollIntoView({behavior:'smooth',block:'start'});
   }catch(e){btn.textContent='Traduire en FR';btn.disabled=false;console.error(e)}
 }
 async function translateRecap(weekStart,btn){
@@ -545,8 +548,9 @@ async function translateRecap(weekStart,btn){
     const original=card.querySelector('.synthesis-body').innerHTML;
     const r=await api('/translate-text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:original})});
     const target=card.querySelector('.recap-translate-result');
-    target.innerHTML='<div class="translate-section"><div class="section-title">Version Fran\u00e7aise</div><div class="synthesis-body">'+( r.text||r.error||'Error')+'</div></div>';
-    btn.textContent='Version FR';btn.classList.add('active');
+    target.innerHTML='<div class="translate-section" style="animation:fadeIn .5s"><div class="section-title" style="color:var(--accent)">Version Fran\u00e7aise</div><div class="synthesis-body">'+md2html(r.text||r.error||'Error')+'</div></div>';
+    btn.textContent='FR \u2713';btn.classList.add('active');btn.style.background='rgba(34,197,94,.15)';btn.style.color='var(--green)';btn.style.borderColor='var(--green)';
+    target.scrollIntoView({behavior:'smooth',block:'start'});
   }catch(e){btn.textContent='Traduire en FR';btn.disabled=false;console.error(e)}
 }
 
