@@ -404,7 +404,7 @@ async function sendChat(){
   chatHistory.push({role:'user',content:q});
   const lastFive=chatHistory.slice(-10);
   try{
-    const resp=await fetch('/api/chat-stream?'+getLangParam(),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,history:lastFive})});
+    const resp=await fetch('/api/chat-stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,history:lastFive})});
     const botDiv=document.getElementById('chat-loading');
     if(!resp.ok){botDiv.innerHTML='Error: '+resp.status;return}
     const ct=resp.headers.get('content-type')||'';
