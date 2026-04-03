@@ -351,8 +351,12 @@ async function loadDetail(id){
         <a href="${e.url}" target="_blank" style="font-size:.75rem">Open original</a>
       </div>
     </div>
-    ${getPlayer(e.url,e.platform)}
-    ${kp.length?`<div class="section"><div class="section-title">Key Points</div><ul class="key-points">${kp.map(p=>'<li>'+p+'</li>').join('')}</ul></div>`:''}
+    <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap">
+      <div style="flex-shrink:0">${getPlayer(e.url,e.platform)}</div>
+      <div style="flex:1;min-width:300px">
+        ${kp.length?`<div class="section"><div class="section-title">Key Points</div><ul class="key-points">${kp.map(p=>'<li>'+p+'</li>').join('')}</ul></div>`:''}
+      </div>
+    </div>
     <div class="section">
       <div class="section-header"><div class="section-title">Analysis</div><div class="badges">
         <button class="btn btn-sm btn-outline" id="translate-btn-${e.id}" onclick="translateSection(${e.id},'analysis',this)">FR</button>
