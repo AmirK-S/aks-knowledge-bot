@@ -303,6 +303,7 @@ function filterCatPlatform(p,btn){
   btn.classList.add('active');
   const filtered=p==='all'?allCatEntries:allCatEntries.filter(e=>e.platform===p);
   renderEntries(filtered,'cat-entries');
+  document.getElementById('cat-title').textContent=currentCat+' ('+filtered.length+' entries)';
 }
 async function synthesizeCat(){
   const el=document.getElementById('cat-synthesis');
@@ -412,20 +413,27 @@ function md2html(t){
 
 // Chat (streaming)
 let chatHistory=[];
+let chatSending=false;
 async function sendChat(){
+  if(chatSending)return;
   const input=document.getElementById('chatInput');const q=input.value.trim();if(!q)return;input.value='';
+  // Make sure we stay on chat page
+  showPage('chat');
+  chatSending=true;
   const msgs=document.getElementById('chat-messages');
-  msgs.innerHTML+=`<div class="chat-msg user">${q.replace(/</g,'&lt;')}</div><div class="chat-msg bot" id="chat-loading"><span style="color:var(--muted)">...</span></div>`;
+  const loadId='chat-load-'+Date.now();
+  msgs.innerHTML+=`<div class="chat-msg user">${q.replace(/</g,'&lt;')}</div><div class="chat-msg bot" id="${loadId}"><span style="color:var(--muted)">...</span></div>`;
   msgs.scrollTop=msgs.scrollHeight;
   chatHistory.push({role:'user',content:q});
   const lastFive=chatHistory.slice(-10);
   try{
     const resp=await fetch('/api/chat-stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,history:lastFive})});
-    const botDiv=document.getElementById('chat-loading');
-    if(!resp.ok){botDiv.innerHTML='Error: '+resp.status;return}
+    const botDiv=document.getElementById(loadId);
+    if(!botDiv){chatSending=false;return}
+    if(!resp.ok){botDiv.innerHTML='Error: '+resp.status;chatSending=false;return}
     const ct=resp.headers.get('content-type')||'';
     if(ct.includes('text/event-stream')){
-      const reader=resp.body.getReader();const dec=new TextDecoder();let full='';let buf='';
+      const reader=resp.body.getReader();const dec=new TextDecoder();let full='';let buf='';let sourcesHtml='';
       while(true){
         const{done,value}=await reader.read();if(done)break;
         buf+=dec.decode(value,{stream:true});
@@ -435,21 +443,22 @@ async function sendChat(){
           const payload=l.slice(6);if(payload==='[DONE]')continue;
           try{const evt=JSON.parse(payload);
             if(evt.type==='chunk'){full+=evt.text;botDiv.innerHTML=md2html(full)}
-            else if(evt.type==='sources'){full+=evt.html;botDiv.innerHTML=md2html(full)}
+            else if(evt.type==='sources'){sourcesHtml=evt.html}
             else if(evt.type==='error'){botDiv.innerHTML=md2html(full+(evt.text||'Error'))}
           }catch(e){}
         }
         msgs.scrollTop=msgs.scrollHeight;
       }
-      botDiv.innerHTML=md2html(full);
+      botDiv.innerHTML=md2html(full)+(sourcesHtml?'<br>'+sourcesHtml:'');
       chatHistory.push({role:'assistant',content:full});
       botDiv.removeAttribute('id');
     }else{
       const r=await resp.json();const answer=r.answer||r.error||'Error';
       chatHistory.push({role:'assistant',content:answer});
-      botDiv.outerHTML=`<div class="chat-msg bot">${md2html(answer)}</div>`;
+      botDiv.innerHTML=md2html(answer);botDiv.removeAttribute('id');
     }
-  }catch(e){console.error('chat error',e);const b=document.getElementById('chat-loading');if(b)b.innerHTML='Connection error. Try again.'}
+  }catch(e){console.error('chat error',e);const b=document.getElementById(loadId);if(b)b.innerHTML='Connection error. Try again.'}
+  chatSending=false;
   msgs.scrollTop=msgs.scrollHeight;
 }
 
