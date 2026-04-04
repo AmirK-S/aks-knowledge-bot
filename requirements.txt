@@ -1,5 +1,6 @@
 aiogram==3.15.0
 httpx==0.28.1
 yt-dlp==2025.3.31
+youtube-transcript-api==1.0.3
 aiosqlite==0.21.0
 orjson==3.10.15
