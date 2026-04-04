@@ -324,7 +324,7 @@ async function synthesizeCat(){
 // Detail page
 function getPlayer(url,platform){
   if(platform==='youtube'){const m=url.match(/(?:v=|youtu\.be\/)([A-Za-z0-9_-]{11})/);if(m)return`<div class="player"><iframe src="https://www.youtube.com/embed/${m[1]}" allowfullscreen></iframe></div>`}
-  if(platform==='instagram'){const m=url.match(/\/reel\/([^\/\?]+)/)||url.match(/\/p\/([^\/\?]+)/);if(m)return`<div style="max-width:360px;margin-bottom:16px;border-radius:12px;overflow:hidden;position:relative"><div style="overflow:hidden;margin-top:-54px;margin-bottom:-56px"><iframe src="https://www.instagram.com/reel/${m[1]}/embed/" style="width:100%;height:680px;border:none" allowfullscreen></iframe></div></div>`}
+  if(platform==='instagram'){return''}
   return`<div style="margin-bottom:16px"><a href="${url}" target="_blank" class="btn btn-outline">Open original</a></div>`;
 }
 function parseKP(raw){try{const a=JSON.parse(raw);if(Array.isArray(a))return a}catch(e){}if(typeof raw==='string'&&raw.trim())return[raw];return[]}
@@ -356,7 +356,7 @@ async function loadDetail(id){
       </div>
     </div>
     <div style="display:flex;gap:20px;align-items:flex-start">
-      <div style="flex-shrink:0;position:sticky;top:20px">${e.video_url?`<div class="player" style="max-width:360px"><video src="${e.video_url}" controls playsinline style="width:100%;border-radius:12px;aspect-ratio:9/16;max-height:500px;object-fit:contain"></video></div>`:getPlayer(e.url,e.platform)}</div>
+      ${getPlayer(e.url,e.platform)?`<div style="flex-shrink:0;position:sticky;top:20px">${getPlayer(e.url,e.platform)}</div>`:''}
       <div style="flex:1;min-width:0;overflow-y:auto">
         ${kp.length?`<div class="section"><div class="section-title">Key Points</div><ul class="key-points">${kp.map(p=>'<li>'+p+'</li>').join('')}</ul></div>`:''}
         <div class="section">
@@ -665,10 +665,28 @@ async def _get_entry(eid: int) -> dict | None:
 
 async def handle_request(reader, writer):
     try:
-        raw = await reader.read(65536)
-        if not raw:
-            writer.close()
-            return
+        # Read headers first
+        raw = b""
+        while b"\r\n\r\n" not in raw:
+            chunk = await asyncio.wait_for(reader.read(8192), timeout=10)
+            if not chunk:
+                writer.close()
+                return
+            raw += chunk
+        # Read body if Content-Length present
+        headers_part, _, body_start = raw.partition(b"\r\n\r\n")
+        content_length = 0
+        for line in headers_part.decode(errors="replace").split("\r\n"):
+            if line.lower().startswith("content-length:"):
+                content_length = int(line.split(":", 1)[1].strip())
+        body = body_start
+        while len(body) < content_length:
+            chunk = await asyncio.wait_for(reader.read(8192), timeout=10)
+            if not chunk:
+                break
+            body += chunk
+        raw = headers_part + b"\r\n\r\n" + body
+
         req_line = raw.decode(errors="replace").split("\r\n")[0]
         parts = req_line.split(" ")
         if len(parts) < 2:
