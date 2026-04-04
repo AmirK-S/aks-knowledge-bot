@@ -82,13 +82,15 @@ async def youtube_get_subtitles(url: str) -> dict:
             "--convert-subs", "srt",
             "-o", sub_path,
             "--print", "%(title)s\n%(duration)s",
-            "--no-warnings",
+            "--extractor-args", "youtube:player_client=ios,web",
             canonical,
         ]
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
         stdout, stderr = await proc.communicate()
+        if proc.returncode != 0 and stderr:
+            log.warning("yt-dlp subtitle extraction failed (rc=%s): %s", proc.returncode, stderr.decode()[:500])
         out_lines = stdout.decode().strip().split("\n") if stdout else []
         title = out_lines[0] if out_lines else None
         duration = int(out_lines[1]) if len(out_lines) > 1 and out_lines[1].isdigit() else None
@@ -113,7 +115,7 @@ async def youtube_get_subtitles(url: str) -> dict:
             "-f", "ba[ext=m4a]/ba/b",
             "--no-playlist",
             "-o", audio_path,
-            "--no-warnings",
+            "--extractor-args", "youtube:player_client=ios,web",
             canonical,
         ]
         if not title:
@@ -122,7 +124,7 @@ async def youtube_get_subtitles(url: str) -> dict:
         proc2 = await asyncio.create_subprocess_exec(
             *cmd2, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
-        stdout2, _ = await proc2.communicate()
+        stdout2, stderr2 = await proc2.communicate()
         if not title and stdout2:
             title = stdout2.decode().strip().split("\n")[0]
 
@@ -132,6 +134,32 @@ async def youtube_get_subtitles(url: str) -> dict:
             persistent = tempfile.mktemp(suffix=".m4a")
             shutil.copy2(audio_path, persistent)
             return {"title": title, "transcript": None, "audio_path": persistent, "duration": duration}
+
+        # Audio download also failed — try original URL (not canonical) as fallback
+        log.warning("yt-dlp audio download failed for %s (rc=%s): %s",
+                     canonical, proc2.returncode, stderr2.decode()[:500] if stderr2 else "no stderr")
+        if canonical != url:
+            log.info("Retrying audio download with original URL: %s", url)
+            cmd3 = [
+                "yt-dlp",
+                "-f", "ba[ext=m4a]/ba/b",
+                "--no-playlist",
+                "-o", audio_path,
+                url,
+            ]
+            proc3 = await asyncio.create_subprocess_exec(
+                *cmd3, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            stdout3, stderr3 = await proc3.communicate()
+            if not title and stdout3:
+                title = stdout3.decode().strip().split("\n")[0]
+            if os.path.exists(audio_path):
+                import shutil
+                persistent = tempfile.mktemp(suffix=".m4a")
+                shutil.copy2(audio_path, persistent)
+                return {"title": title, "transcript": None, "audio_path": persistent, "duration": duration}
+            log.warning("yt-dlp retry also failed (rc=%s): %s",
+                         proc3.returncode, stderr3.decode()[:500] if stderr3 else "no stderr")
 
         return {"title": title, "transcript": None, "audio_path": None, "duration": None}
 
