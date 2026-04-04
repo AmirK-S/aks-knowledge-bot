@@ -324,7 +324,7 @@ async function synthesizeCat(){
 // Detail page
 function getPlayer(url,platform){
   if(platform==='youtube'){const m=url.match(/(?:v=|youtu\.be\/)([A-Za-z0-9_-]{11})/);if(m)return`<div class="player"><iframe src="https://www.youtube.com/embed/${m[1]}" allowfullscreen></iframe></div>`}
-  if(platform==='instagram'){return''}
+  if(platform==='instagram'){const m=url.match(/\/reel\/([^\/\?]+)/)||url.match(/\/p\/([^\/\?]+)/);if(m)return`<div class="player" style="max-width:360px"><iframe src="https://www.instagram.com/reel/${m[1]}/embed/" style="width:100%;aspect-ratio:9/16;max-height:550px;border:none" allowfullscreen></iframe></div>`}
   return`<div style="margin-bottom:16px"><a href="${url}" target="_blank" class="btn btn-outline">Open original</a></div>`;
 }
 function parseKP(raw){try{const a=JSON.parse(raw);if(Array.isArray(a))return a}catch(e){}if(typeof raw==='string'&&raw.trim())return[raw];return[]}
@@ -356,7 +356,7 @@ async function loadDetail(id){
       </div>
     </div>
     <div style="display:flex;gap:20px;align-items:flex-start">
-      ${getPlayer(e.url,e.platform)?`<div style="flex-shrink:0;position:sticky;top:20px">${getPlayer(e.url,e.platform)}</div>`:''}
+      <div style="flex-shrink:0;position:sticky;top:20px">${getPlayer(e.url,e.platform)}</div>
       <div style="flex:1;min-width:0;overflow-y:auto">
         ${kp.length?`<div class="section"><div class="section-title">Key Points</div><ul class="key-points">${kp.map(p=>'<li>'+p+'</li>').join('')}</ul></div>`:''}
         <div class="section">
