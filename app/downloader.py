@@ -65,45 +65,93 @@ def canonicalize_url(url: str, platform: str | None = None) -> str:
 # ---------------------------------------------------------------------------
 
 
-async def _youtube_transcript_api(video_id: str) -> str | None:
-    """Try to get transcript via youtube-transcript-api (not blocked by bot detection)."""
+_BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
+async def _youtube_scrape_transcript(video_id: str) -> tuple[str | None, str | None, int | None]:
+    """Scrape transcript directly from YouTube page HTML + innertube API.
+    Returns (transcript, title, duration). Works even on bot-blocked VPS IPs."""
+    transcript, title, duration = None, None, None
     try:
-        from youtube_transcript_api import YouTubeTranscriptApi
-        ytt_api = YouTubeTranscriptApi()
-        transcript_list = ytt_api.fetch(video_id, languages=["en", "fr"])
-        text = " ".join(snippet.text for snippet in transcript_list)
-        if text and len(text) > 50:
-            return text
+        async with httpx.AsyncClient(timeout=20, headers=_BROWSER_HEADERS, follow_redirects=True) as client:
+            # Fetch the watch page
+            r = await client.get(f"https://www.youtube.com/watch?v={video_id}")
+            html = r.text
+
+            # Extract title
+            m = re.search(r'"title":"(.*?)"', html)
+            if m:
+                title = json.loads(f'"{m.group(1)}"')  # handle unicode escapes
+
+            # Extract duration
+            m = re.search(r'"lengthSeconds":"(\d+)"', html)
+            if m:
+                duration = int(m.group(1))
+
+            # Extract caption track URLs from ytInitialPlayerResponse
+            m = re.search(r'"captionTracks":\s*(\[.*?\])', html)
+            if not m:
+                log.info("No captionTracks found in page HTML for %s", video_id)
+                return None, title, duration
+
+            tracks = json.loads(m.group(1))
+
+            # Pick best track: prefer manual en, then auto en, then fr, then any
+            chosen_url = None
+            for pref_lang in ("en", "fr"):
+                for track in tracks:
+                    lang = track.get("languageCode", "")
+                    if lang.startswith(pref_lang):
+                        chosen_url = track.get("baseUrl")
+                        break
+                if chosen_url:
+                    break
+            if not chosen_url and tracks:
+                chosen_url = tracks[0].get("baseUrl")
+
+            if not chosen_url:
+                return None, title, duration
+
+            # Fetch the transcript XML (fmt=3 for plain text JSON, default is XML)
+            tr = await client.get(chosen_url + "&fmt=json3")
+            if tr.status_code == 200:
+                data = tr.json()
+                events = data.get("events", [])
+                texts = []
+                for ev in events:
+                    segs = ev.get("segs", [])
+                    for seg in segs:
+                        t = seg.get("utf8", "").strip()
+                        if t and t != "\n":
+                            texts.append(t)
+                transcript = " ".join(texts)
+            else:
+                # Fallback: XML format
+                tr = await client.get(chosen_url)
+                if tr.status_code == 200:
+                    # Simple XML text extraction
+                    transcript = " ".join(
+                        re.sub(r"<[^>]+>", "", seg).strip()
+                        for seg in re.findall(r"<text[^>]*>(.*?)</text>", tr.text, re.DOTALL)
+                    )
+
+            if transcript:
+                # Clean HTML entities
+                transcript = transcript.replace("&amp;", "&").replace("&#39;", "'").replace("&quot;", '"').replace("&lt;", "<").replace("&gt;", ">")
+
+            if transcript and len(transcript) > 50:
+                log.info("Got transcript via HTML scrape for %s (%d chars)", video_id, len(transcript))
+                return transcript, title, duration
+            else:
+                log.warning("Scraped transcript too short for %s: %d chars", video_id, len(transcript) if transcript else 0)
+
     except Exception as e:
-        log.warning("youtube-transcript-api failed for %s: %s", video_id, e)
-    return None
+        log.warning("YouTube HTML scrape failed for %s: %s", video_id, e)
 
-
-async def _youtube_title_duration(video_id: str) -> tuple[str | None, int | None]:
-    """Get title and duration via oEmbed API (no bot detection)."""
-    title, duration = None, None
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get(f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json")
-            if r.status_code == 200:
-                title = r.json().get("title")
-    except Exception:
-        pass
-    # Try to get duration via yt-dlp --print (may fail on bot-blocked IPs)
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "yt-dlp", "--no-download", "--print", "%(duration)s", "--no-warnings",
-            f"https://www.youtube.com/watch?v={video_id}",
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        stdout, _ = await proc.communicate()
-        if stdout:
-            val = stdout.decode().strip()
-            if val.isdigit():
-                duration = int(val)
-    except Exception:
-        pass
-    return title, duration
+    return None, title, duration
 
 
 async def youtube_get_subtitles(url: str) -> dict:
@@ -111,16 +159,33 @@ async def youtube_get_subtitles(url: str) -> dict:
     canonical = canonicalize_url(url, "youtube")
     video_id = extract_youtube_id(url)
 
-    # Get title via oEmbed (reliable, no bot detection)
-    title, duration = await _youtube_title_duration(video_id)
-
-    # 1. Try youtube-transcript-api first (not affected by bot detection)
-    transcript = await _youtube_transcript_api(video_id)
+    # 1. Try direct HTML scrape (works on bot-blocked IPs)
+    transcript, title, duration = await _youtube_scrape_transcript(video_id)
     if transcript:
-        log.info("Got transcript via youtube-transcript-api for %s", canonical)
         return {"title": title, "transcript": transcript, "audio_path": None, "duration": duration}
 
-    # 2. Try yt-dlp subtitles
+    # 2. Try youtube-transcript-api
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+        ytt_api = YouTubeTranscriptApi()
+        transcript_list = ytt_api.fetch(video_id, languages=["en", "fr"])
+        text = " ".join(snippet.text for snippet in transcript_list)
+        if text and len(text) > 50:
+            log.info("Got transcript via youtube-transcript-api for %s", canonical)
+            # Get title via oEmbed if missing
+            if not title:
+                try:
+                    async with httpx.AsyncClient(timeout=10) as client:
+                        r = await client.get(f"https://www.youtube.com/oembed?url={canonical}&format=json")
+                        if r.status_code == 200:
+                            title = r.json().get("title")
+                except Exception:
+                    pass
+            return {"title": title, "transcript": text, "audio_path": None, "duration": duration}
+    except Exception as e:
+        log.warning("youtube-transcript-api failed for %s: %s", video_id, e)
+
+    # 3. Try yt-dlp subtitles + audio fallback
     with tempfile.TemporaryDirectory() as tmpdir:
         sub_path = os.path.join(tmpdir, "subs")
         cmd = [
@@ -161,7 +226,7 @@ async def youtube_get_subtitles(url: str) -> dict:
                         log.info("Got subtitles via yt-dlp for %s (lang=%s)", canonical, lang)
                         return {"title": title, "transcript": transcript, "audio_path": None, "duration": duration}
 
-        # 3. Download audio for Whisper transcription
+        # 4. Download audio for Whisper transcription
         log.info("No subtitles found for %s, downloading audio", canonical)
         audio_path = os.path.join(tmpdir, "audio.m4a")
         cmd2 = [
