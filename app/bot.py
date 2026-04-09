@@ -299,13 +299,11 @@ async def handle_message(msg: Message):
             if result.get("success"):
                 # Send analysis
                 analysis = result.get("analysis", "No analysis generated.")
-                header = (
-                    f"<b>{result.get('title') or 'Untitled'}</b>\n"
-                    f"Category: <b>{result.get('category', '?')}</b> | "
-                    f"Platform: {result.get('platform', '?')}\n"
-                    f"Tags: {', '.join(result.get('tags', []))}\n\n"
-                )
-                await _send(msg, header + analysis)
+                title = result.get("title") or "Untitled"
+                url_link = result.get("url", "")
+                header = f"<b>{title}</b>\n\n"
+                footer = f'\n\n<a href="{url_link}">Source</a>' if url_link else ""
+                await _send(msg, header + analysis + footer)
             else:
                 await msg.answer(f"Failed: {result.get('error', 'Unknown error')}")
 
