@@ -78,7 +78,9 @@ async def _youtube_apify_transcript(video_id: str) -> tuple[str | None, str | No
                 },
                 json={"urls": [f"https://www.youtube.com/watch?v={video_id}"]},
             )
-            resp.raise_for_status()
+            if resp.status_code not in (200, 201):
+                log.warning("Apify YouTube returned %s: %s", resp.status_code, resp.text[:300])
+                return None, None, None
             data = resp.json()
 
         if not data:
@@ -87,18 +89,17 @@ async def _youtube_apify_transcript(video_id: str) -> tuple[str | None, str | No
 
         item = data[0] if isinstance(data, list) else data
         title = item.get("title")
-        transcript = item.get("transcript") or item.get("text") or item.get("content")
 
-        # Some actors return transcript as list of segments
-        if isinstance(transcript, list):
-            transcript = " ".join(
-                seg.get("text", "") if isinstance(seg, dict) else str(seg)
-                for seg in transcript
-            )
+        # Actor returns captions as list of strings
+        captions = item.get("captions", [])
+        if isinstance(captions, list) and captions:
+            transcript = " ".join(str(c) for c in captions)
+            # Clean HTML entities
+            transcript = transcript.replace("&#39;", "'").replace("&amp;", "&").replace("&quot;", '"')
+        else:
+            transcript = None
 
-        duration = item.get("duration") or item.get("lengthSeconds")
-        if isinstance(duration, str) and duration.isdigit():
-            duration = int(duration)
+        duration = None  # Actor doesn't return duration
 
         if transcript and len(transcript) > 50:
             log.info("Got transcript via Apify for %s (%d chars)", video_id, len(transcript))
